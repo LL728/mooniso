@@ -49,6 +49,8 @@ pub struct DirectoryRecord {
   flags : Int32
   name : String
   date : RecordDate
+  /// system use area 原始字节（Rock Ridge / SUSP 扩展放这里）；没有则为空。
+  system_use : Bytes
 }
 
 ///|
@@ -83,10 +85,50 @@ pub fn normalize_iso_name(raw : String) -> String {
 }
 
 ///|
-/// 从 reader 当前位置解析一条目录记录，返回记录本身与消耗的字节数。
-/// 返回长度为 0 表示目录数据在本扇区后面是填充。
+/// 解码 Joliet 的 UCS-2 大端名字（含非 BMP 的代理对），遇到 NUL 结束。
+pub fn decode_ucs2_be(raw : Bytes) -> String {
+  let mut out = ""
+  let mut i = 0
+  while i + 1 < raw.length() {
+    let hi = raw[i].to_uint().reinterpret_as_int()
+    let lo = raw[i + 1].to_uint().reinterpret_as_int()
+    let unit = (hi << 8) | lo
+    i += 2
+    if unit == 0 {
+      break
+    }
+    if unit >= 0xD800 && unit <= 0xDBFF && i + 1 < raw.length() {
+      let hi2 = raw[i].to_uint().reinterpret_as_int()
+      let lo2 = raw[i + 1].to_uint().reinterpret_as_int()
+      let unit2 = (hi2 << 8) | lo2
+      if unit2 >= 0xDC00 && unit2 <= 0xDFFF {
+        let combined = 0x10000 + ((unit - 0xD800) << 10) + (unit2 - 0xDC00)
+        out = out + Int32::unsafe_to_char(combined).to_string()
+        i += 2
+        continue
+      }
+    }
+    out = out + Int32::unsafe_to_char(unit).to_string()
+  }
+  out
+}
+
+///|
+/// 解析一条 ISO 9660（ASCII 名字）目录记录。
 pub fn parse_directory_record(
   reader : ByteReader,
+) -> (DirectoryRecord, Int32) raise IsoError {
+  parse_directory_record_in(reader, false)
+}
+
+///|
+/// 从 reader 当前位置解析一条目录记录，返回记录本身与消耗的字节数。
+///
+/// `joliet` 为 true 时名字按 UCS-2 大端解码（补充卷描述符里的记录）。
+/// 返回长度为 0 表示目录数据在本扇区后面是填充。
+pub fn parse_directory_record_in(
+  reader : ByteReader,
+  joliet : Bool,
 ) -> (DirectoryRecord, Int32) raise IsoError {
   let start = reader.position()
   let len = reader.read_u8().reinterpret_as_int()
@@ -107,6 +149,7 @@ pub fn parse_directory_record(
           second: 0,
           gmt_offset_quarters: 0,
         },
+        system_use: Bytes::new(0),
       },
       0,
     )
@@ -138,6 +181,8 @@ pub fn parse_directory_record(
     } else {
       "\u{1}"
     }
+  } else if joliet {
+    normalize_iso_name(decode_ucs2_be(reader.read_bytes(name_len)))
   } else {
     normalize_iso_name(reader.read_ascii(name_len))
   }
@@ -146,9 +191,11 @@ pub fn parse_directory_record(
     reader.skip(1)
   }
   let consumed = reader.position() - start
-  // 跳过 system use area（Rock Ridge 将来在这里解析）
-  if consumed < len {
-    reader.skip(len - consumed)
+  // system use area：Rock Ridge / SUSP 扩展就放在这里
+  let system_use = if consumed < len {
+    reader.read_bytes(len - consumed)
+  } else {
+    Bytes::new(0)
   }
   (
     DirectoryRecord::{
@@ -165,6 +212,7 @@ pub fn parse_directory_record(
         second,
         gmt_offset_quarters: gmt,
       },
+      system_use,
     },
     len,
   )

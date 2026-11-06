@@ -10,6 +10,9 @@ pub struct IsoImage {
   block_size : Int32
   volume_space_size : Int32
   root : DirectoryRecord
+  /// Joliet 补充卷描述符的根目录；存在时默认使用它的名字（UCS-2）。
+  joliet_root : DirectoryRecord?
+  joliet_level : Int32
 }
 
 ///|
@@ -32,12 +35,22 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
     (pvd.root.extent + 1) * pvd.logical_block_size > data.length() {
     raise Truncated
   }
+  let joliet = find_joliet_descriptor(data)
+  let joliet_level = match joliet {
+    Some(d) => d.level
+    None => 0
+  }
   IsoImage::{
     data,
     volume_id: pvd.volume_id,
     block_size: pvd.logical_block_size,
     volume_space_size: pvd.volume_space_size,
     root: pvd.root,
+    joliet_root: match joliet {
+      Some(d) => Some(d.root)
+      None => None
+    },
+    joliet_level,
   }
 }
 
@@ -59,6 +72,33 @@ pub fn IsoImage::volume_space_size(self : IsoImage) -> Int32 {
 ///|
 pub fn IsoImage::root(self : IsoImage) -> DirectoryRecord {
   self.root
+}
+
+///|
+/// 是否使用 Joliet 名字（存在补充卷描述符时为真）。
+pub fn IsoImage::uses_joliet(self : IsoImage) -> Bool {
+  self.joliet_root is Some(_)
+}
+
+///|
+/// Joliet 级别（1/2/3），无 Joliet 时为 0。
+pub fn IsoImage::joliet_level(self : IsoImage) -> Int32 {
+  self.joliet_level
+}
+
+///|
+/// 当前生效的根目录：有 Joliet 用 Joliet 树，否则用主卷树。
+fn IsoImage::active_root(self : IsoImage) -> DirectoryRecord {
+  match self.joliet_root {
+    Some(root) => root
+    None => self.root
+  }
+}
+
+///|
+/// 名字匹配：先精确，再退化为 ASCII 大小写不敏感。
+fn name_matches(a : String, b : String) -> Bool {
+  a == b || ascii_eq_ignore_case(a, b)
 }
 
 ///|
@@ -91,6 +131,16 @@ fn IsoImage::read_directory(
   self : IsoImage,
   dir : DirectoryRecord,
 ) -> Array[DirectoryRecord] raise IsoError {
+  self.read_directory_in(dir, self.uses_joliet())
+}
+
+///|
+/// 读取目录数据；`joliet` 为真时按 UCS-2 解码名字。
+fn IsoImage::read_directory_in(
+  self : IsoImage,
+  dir : DirectoryRecord,
+  joliet : Bool,
+) -> Array[DirectoryRecord] raise IsoError {
   if !dir.is_dir() {
     raise NotDirectory(dir.name)
   }
@@ -103,7 +153,7 @@ fn IsoImage::read_directory(
   reader.seek(start)
   let out : Array[DirectoryRecord] = []
   while reader.position() < end {
-    let (record, len) = parse_directory_record(reader)
+    let (record, len) = parse_directory_record_in(reader, joliet)
     if len == 0 {
       // 填充：跳到下一个扇区边界
       let next = (reader.position() / SECTOR_SIZE + 1) * SECTOR_SIZE
@@ -150,6 +200,7 @@ pub fn IsoImage::list_dir(
         flags: r.flags & 0x7F,
         name: r.name,
         date: r.date,
+        system_use: r.system_use,
       })
       i = j
     } else {
@@ -169,7 +220,7 @@ pub fn IsoImage::find_records(
   self : IsoImage,
   path : String,
 ) -> Array[DirectoryRecord] raise IsoError {
-  let mut current = self.root
+  let mut current = self.active_root()
   let segments : Array[String] = []
   for segment in path.split("/") {
     let seg = segment.to_owned()
@@ -192,7 +243,7 @@ pub fn IsoImage::find_records(
       if r.is_special() {
         continue
       }
-      if ascii_eq_ignore_case(r.name, seg) {
+      if name_matches(r.name, seg) {
         matched.push(r)
         started = true
       } else if started {

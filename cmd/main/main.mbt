@@ -70,7 +70,7 @@ fn main {
     } else if command == "ls" {
       print_listing(image, path)
     } else if command == "cat" {
-      println(image.read_file(path).to_unchecked_string())
+      println(@utf8.decode_lossy(image.read_file(path)))
     } else {
       // extract 需要第三个参数：输出路径
       if base + 3 >= args.length() {

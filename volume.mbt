@@ -101,3 +101,46 @@ pub fn parse_primary_volume_descriptor(
     root,
   }
 }
+
+///|
+/// Joliet 补充卷描述符。
+pub struct JolietDescriptor {
+  level : Int32
+  root : DirectoryRecord
+}
+
+///|
+/// 查找 Joliet 补充卷描述符：类型 2，偏移 88 的转义序列为 %/@、%/C 或 %/E。
+pub fn find_joliet_descriptor(data : Bytes) -> JolietDescriptor? raise IsoError {
+  for entry in scan_volume_descriptors(data) {
+    let dtype = entry.0
+    let lba = entry.1
+    if dtype != 2 {
+      continue
+    }
+    let r = read_sector(data, lba)
+    r.seek(lba * SECTOR_SIZE + 88)
+    let b0 = r.read_u8().reinterpret_as_int()
+    let b1 = r.read_u8().reinterpret_as_int()
+    let b2 = r.read_u8().reinterpret_as_int()
+    if b0 != 0x25 || b1 != 0x2F {
+      continue
+    }
+    let level = if b2 == 0x40 {
+      1
+    } else if b2 == 0x43 {
+      2
+    } else if b2 == 0x45 {
+      3
+    } else {
+      0
+    }
+    if level > 0 {
+      let root_reader = read_sector(data, lba)
+      root_reader.seek(lba * SECTOR_SIZE + 156)
+      let (root, _) = parse_directory_record_in(root_reader, true)
+      return Some(JolietDescriptor::{ level, root, })
+    }
+  }
+  None
+}
