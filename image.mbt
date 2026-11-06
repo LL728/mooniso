@@ -124,44 +124,144 @@ pub fn IsoImage::list_dir(
   let dir = self.find_record(path)
   let records = self.read_directory(dir)
   let out : Array[DirectoryRecord] = []
-  for r in records {
-    if !r.is_special() {
+  let mut i = 0
+  while i < records.length() {
+    let r = records[i]
+    if r.is_special() {
+      i += 1
+      continue
+    }
+    if r.is_multi_extent() {
+      // 多段文件在列举时合并成一条，大小取各段之和
+      let mut total = r.size
+      let mut j = i + 1
+      while j < records.length() {
+        let next = records[j]
+        total = total + next.size
+        let more = next.is_multi_extent()
+        j += 1
+        if !more {
+          break
+        }
+      }
+      out.push(DirectoryRecord::{
+        extent: r.extent,
+        size: total,
+        flags: r.flags & 0x7F,
+        name: r.name,
+        date: r.date,
+      })
+      i = j
+    } else {
       out.push(r)
+      i += 1
     }
   }
   out
 }
 
 ///|
-/// 按路径查找一条记录；路径以 / 分隔，忽略开头结尾的 / 与连续 /。
-pub fn IsoImage::find_record(
+/// 按路径查找「组成同一实体的连续记录」。
+///
+/// ISO 9660 的多段文件（flags bit 7 = 1 表示后面还有一段）用同名连续记录描述，
+/// 目录永远只有一条记录。
+pub fn IsoImage::find_records(
   self : IsoImage,
   path : String,
-) -> DirectoryRecord raise IsoError {
+) -> Array[DirectoryRecord] raise IsoError {
   let mut current = self.root
-  let mut pending = false
+  let segments : Array[String] = []
   for segment in path.split("/") {
     let seg = segment.to_owned()
-    if seg == "" {
-      continue
+    if seg != "" {
+      segments.push(seg)
     }
+  }
+  if segments.length() == 0 {
+    return [current]
+  }
+  for i = 0; i < segments.length(); i = i + 1 {
+    let seg = segments[i]
     if !current.is_dir() {
       raise NotDirectory(current.name)
     }
     let records = self.read_directory(current)
-    let mut found = false
+    let matched : Array[DirectoryRecord] = []
+    let mut started = false
     for r in records {
-      if !r.is_special() && ascii_eq_ignore_case(r.name, seg) {
-        current = r
-        found = true
+      if r.is_special() {
+        continue
+      }
+      if ascii_eq_ignore_case(r.name, seg) {
+        matched.push(r)
+        started = true
+      } else if started {
         break
       }
     }
-    if !found {
+    if matched.length() == 0 {
       raise NotFound(path)
     }
-    pending = true
+    let is_last = i == segments.length() - 1
+    if is_last {
+      return matched
+    }
+    if matched.length() > 1 {
+      raise NotDirectory(seg)
+    }
+    current = matched[0]
   }
-  let _ = pending
-  current
+  [current]
+}
+
+///|
+/// 按路径查找一条记录（多段文件返回第一段）。
+pub fn IsoImage::find_record(
+  self : IsoImage,
+  path : String,
+) -> DirectoryRecord raise IsoError {
+  self.find_records(path)[0]
+}
+
+///|
+/// 读取文件内容：多段文件按记录顺序拼接，目录以 IsDirectory 失败。
+/// 全程做边界检查，越界一律 Truncated，不会读到映像之外。
+pub fn IsoImage::read_file(
+  self : IsoImage,
+  path : String,
+) -> Bytes raise IsoError {
+  let records = self.find_records(path)
+  if records[0].is_dir() {
+    raise IsDirectory(path)
+  }
+  let mut total = 0
+  for r in records {
+    total = total + r.size
+  }
+  let out = FixedArray::make(total, b'\x00')
+  let mut written = 0
+  for r in records {
+    let start = r.extent * self.block_size
+    if r.size < 0 || start < 0 || start + r.size > self.data.length() {
+      raise Truncated
+    }
+    for i = 0; i < r.size; i = i + 1 {
+      out[written + i] = self.data[start + i]
+    }
+    written = written + r.size
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
+/// 文件大小（多段文件为各段之和）。
+pub fn IsoImage::file_size(
+  self : IsoImage,
+  path : String,
+) -> Int32 raise IsoError {
+  let mut total = 0
+  for r in self.find_records(path) {
+    total = total + r.size
+  }
+  total
 }

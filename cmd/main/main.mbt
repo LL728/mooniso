@@ -5,8 +5,18 @@
 ///|
 fn usage() -> Unit {
   println("usage:")
-  println("  mooniso info <image.iso>            print volume information")
-  println("  mooniso ls   <image.iso> [path]     list a directory (default /)")
+  println(
+    "  mooniso info    <image.iso>                print volume information",
+  )
+  println(
+    "  mooniso ls      <image.iso> [path]         list a directory (default /)",
+  )
+  println(
+    "  mooniso cat     <image.iso> <path>         print a text file to stdout",
+  )
+  println(
+    "  mooniso extract <image.iso> <path> <out>   write a file to disk (binary safe)",
+  )
 }
 
 ///|
@@ -45,7 +55,10 @@ fn main {
     return
   }
   let command = args[base]
-  if command != "info" && command != "ls" {
+  if command != "info" &&
+    command != "ls" &&
+    command != "cat" &&
+    command != "extract" {
     usage()
     return
   }
@@ -54,8 +67,20 @@ fn main {
     let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes(args[base + 1]))
     if command == "info" {
       print_info(image)
-    } else {
+    } else if command == "ls" {
       print_listing(image, path)
+    } else if command == "cat" {
+      println(image.read_file(path).to_unchecked_string())
+    } else {
+      // extract 需要第三个参数：输出路径
+      if base + 3 >= args.length() {
+        usage()
+        return
+      }
+      @fs.write_bytes_to_file(args[base + 3], image.read_file(path))
+      println(
+        "extracted \{path} -> \{args[base + 3]} (\{image.file_size(path)} bytes)",
+      )
     }
   } catch {
     @mooniso.IsoError::Truncated => println("ERROR\ttruncated image")
@@ -68,6 +93,7 @@ fn main {
     @mooniso.IsoError::NotFound(p) => println("ERROR\tno such path: \{p}")
     @mooniso.IsoError::NotDirectory(p) =>
       println("ERROR\tnot a directory: \{p}")
+    @mooniso.IsoError::IsDirectory(p) => println("ERROR\tis a directory: \{p}")
     @mooniso.IsoError::BadDirectoryRecord(len) =>
       println("ERROR\tbad directory record (\{len} bytes)")
     @fs.IOError::IOError(msg) => println("ERROR\tI/O: \{msg}")

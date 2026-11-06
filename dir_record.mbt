@@ -57,6 +57,12 @@ pub fn DirectoryRecord::is_dir(self : DirectoryRecord) -> Bool {
 }
 
 ///|
+/// flags 的 bit 7：多段文件，后面还有同名的连续记录。
+pub fn DirectoryRecord::is_multi_extent(self : DirectoryRecord) -> Bool {
+  (self.flags & 0x80) != 0
+}
+
+///|
 /// 特殊记录：0x00 是「本目录」，0x01 是「父目录」。
 pub fn DirectoryRecord::is_special(self : DirectoryRecord) -> Bool {
   self.name == "\u{0}" || self.name == "\u{1}"

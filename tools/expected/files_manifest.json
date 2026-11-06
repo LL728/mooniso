@@ -1,0 +1,14 @@
+{
+  "BIG.BIN": {
+    "sha256": "34398b85297bf7d9dfb59b8d511d8bbb44ab23e891570e4395e7871475fc8afb",
+    "size": 5000
+  },
+  "EMPTY.TXT": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size": 0
+  },
+  "TEXT.TXT": {
+    "sha256": "e9024f1a07d29d52ad3aa5e1a18e94db1f3a9fd32b89e39d47c472cd99071e13",
+    "size": 18
+  }
+}

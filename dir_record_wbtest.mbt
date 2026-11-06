@@ -1,15 +1,16 @@
 // 目录记录单元测试。
 
 ///|
-/// 构造一条目录记录的字节序列（不含 system use area）。
-fn make_record(
+/// 构造一条目录记录的字节序列（不含 system use area），extra 会 OR 进 flags。
+fn make_record_flags(
   name : Array[Byte],
   is_dir : Bool,
   extent : Int32,
   size : Int32,
+  extra : Int32,
 ) -> Array[Byte] {
   let out : Array[Byte] = []
-  let flags : Byte = if is_dir { b'\x02' } else { b'\x00' }
+  let flags : Byte = ((if is_dir { 2 } else { 0 }) | extra).to_byte()
   // 记录长度先占位
   out.push(b'\x00')
   out.push(b'\x00')
@@ -43,6 +44,16 @@ fn make_record(
   }
   out[0] = out.length().to_byte()
   out
+}
+
+///|
+fn make_record(
+  name : Array[Byte],
+  is_dir : Bool,
+  extent : Int32,
+  size : Int32,
+) -> Array[Byte] {
+  make_record_flags(name, is_dir, extent, size, 0)
 }
 
 ///|

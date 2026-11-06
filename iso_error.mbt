@@ -10,5 +10,6 @@ pub suberror IsoError {
   BadDescriptor(Int32)
   NotFound(String)
   NotDirectory(String)
+  IsDirectory(String)
   BadDirectoryRecord(Int32)
 }

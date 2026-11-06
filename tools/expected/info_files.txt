@@ -1,0 +1,5 @@
+volume_id=MOONISO_TEST
+block_size=2048
+volume_space_size=26
+root_extent=20
+root_size=2048
