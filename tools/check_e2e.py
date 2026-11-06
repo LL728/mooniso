@@ -3,8 +3,9 @@
 
     python tools/check_e2e.py
 
-在 Linux（CI）上加 --mount 时，会额外用内核 iso9660 驱动挂载同一映像，
-把挂载结果与 CLI 的目录输出独立对照 —— 两种实现读同一份字节，结果必须一致。
+加 --mount-point <dir> 时，会把这个"已挂载的同一映像"的目录内容
+与 CLI 输出对照 —— 两种独立实现读同一份字节，结果必须一致。
+挂载动作由调用方完成（CI 用内核 iso9660，本地可用系统自带的镜像挂载）。
 """
 
 import os
@@ -14,7 +15,6 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CORPUS = os.path.join(ROOT, "tools", "corpus")
 EXPECTED = os.path.join(ROOT, "tools", "expected")
 
 CASES = [
@@ -23,7 +23,6 @@ CASES = [
     ("ls-sub", ["ls", "tools/corpus/minimal.iso", "/SUB"], "ls_sub.txt"),
 ]
 
-# 挂载结果里的相对路径 -> CLI 目录输出里的条目名
 MOUNT_ENTRIES = {"HELLO.TXT", "SUB"}
 MOUNT_SUB_ENTRIES = {"INNER.TXT"}
 
@@ -37,6 +36,10 @@ def run_cli(args):
         print("CLI 退出码 %d: %s" % (proc.returncode, proc.stderr.strip()))
         sys.exit(2)
     return proc.stdout
+
+
+def cli_names(args):
+    return {line.split("\t")[0] for line in run_cli(args).splitlines() if line}
 
 
 def check_outputs(failures):
@@ -58,37 +61,36 @@ def check_error_path(failures):
         print("ok   ls-missing-path")
 
 
-def check_mount(failures):
-    image = os.path.join(CORPUS, "minimal.iso")
-    mnt = "/tmp/mooniso-mnt"
-    os.makedirs(mnt, exist_ok=True)
-    if subprocess.run(["mount", "-o", "loop,ro", "-t", "iso9660", image, mnt]).returncode != 0:
-        failures.append("挂载失败（需要 root）")
+def check_mount(failures, mount_point):
+    if not os.path.isdir(mount_point):
+        failures.append("挂载点不存在: %s" % mount_point)
         return
-    try:
-        root = set(os.listdir(mnt))
-        sub = set(os.listdir(os.path.join(mnt, "SUB")))
-        cli_root = {line.split("\t")[0] for line in run_cli(["ls", "tools/corpus/minimal.iso"]).splitlines()}
-        cli_sub = {
-            line.split("\t")[0]
-            for line in run_cli(["ls", "tools/corpus/minimal.iso", "/SUB"]).splitlines()
-        }
-        if root != MOUNT_ENTRIES or cli_root != root:
-            failures.append("根目录不一致: mount=%s cli=%s" % (sorted(root), sorted(cli_root)))
-        if sub != MOUNT_SUB_ENTRIES or cli_sub != sub:
-            failures.append("SUB 目录不一致: mount=%s cli=%s" % (sorted(sub), sorted(cli_sub)))
-        if not failures:
-            print("ok   mount-vs-cli")
-    finally:
-        subprocess.run(["umount", mnt], check=False)
+    root = set(os.listdir(mount_point))
+    sub = set(os.listdir(os.path.join(mount_point, "SUB")))
+    cli_root = cli_names(["ls", "tools/corpus/minimal.iso"])
+    cli_sub = cli_names(["ls", "tools/corpus/minimal.iso", "/SUB"])
+    if root != MOUNT_ENTRIES:
+        failures.append("挂载结果与预期不符: %s" % sorted(root))
+    elif cli_root != root:
+        failures.append("根目录不一致: mount=%s cli=%s" % (sorted(root), sorted(cli_root)))
+    if sub != MOUNT_SUB_ENTRIES:
+        failures.append("挂载的 SUB 目录与预期不符: %s" % sorted(sub))
+    elif cli_sub != sub:
+        failures.append("SUB 目录不一致: mount=%s cli=%s" % (sorted(sub), sorted(cli_sub)))
+    if not failures:
+        print("ok   mount-vs-cli (%s)" % mount_point)
 
 
 def main():
     failures = []
     check_outputs(failures)
     check_error_path(failures)
-    if "--mount" in sys.argv:
-        check_mount(failures)
+    mount_point = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--mount-point" and i + 1 < len(sys.argv):
+            mount_point = sys.argv[i + 1]
+    if mount_point:
+        check_mount(failures, mount_point)
     if failures:
         print("\n".join(failures))
         print("FAILED")

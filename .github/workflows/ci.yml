@@ -48,7 +48,13 @@ jobs:
           python3 tools/gen_fixtures.py
           git diff --exit-code tools/corpus
 
-      - name: 端到端对拍（CLI 输出 + 内核挂载交叉验证）
+      - name: 端到端对拍（CLI 输出）
+        run: python3 tools/check_e2e.py
+
+      # 内核 iso9660 驱动读同一份映像，作为独立实现与 CLI 交叉验证
+      - name: 内核挂载交叉验证
         run: |
-          python3 tools/check_e2e.py
-          sudo python3 tools/check_e2e.py --mount
+          sudo mkdir -p /mnt/mooniso
+          sudo mount -o loop,ro -t iso9660 tools/corpus/minimal.iso /mnt/mooniso
+          python3 tools/check_e2e.py --mount-point /mnt/mooniso
+          sudo umount /mnt/mooniso
