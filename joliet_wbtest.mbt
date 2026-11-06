@@ -48,3 +48,13 @@ test "rock ridge aware parser keeps ISO name when not joliet" {
   )
   assert_eq(record.name, "A.TXT")
 }
+
+///|
+test "decode ucs2 handles the CJK bytes our writer emits" {
+  let raw = bytes_of([
+    b'\x8B', b'\xF4', b'\x66', b'\x0E', b'\x00', b'.', b'\x00', b't', b'\x00', b'x',
+    b'\x00', b't', b'\x00', b';', b'\x00', b'1',
+  ])
+  assert_eq(decode_ucs2_be(raw), "说明.txt;1")
+  assert_eq(normalize_iso_name(decode_ucs2_be(raw)), "说明.txt")
+}

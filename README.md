@@ -2,20 +2,21 @@
 
 纯 MoonBit 实现的 ISO 9660（ECMA-119）光盘映像读写库，零第三方运行依赖。
 
-## 状态
+## 能力
 
-已实现（读取侧）：
+读取：
 
-- 卷描述符链扫描与主卷描述符（PVD）解析
-- 目录记录解析（both-endian 字段校验、时间戳、特殊记录 `.` / `..`）
+- 卷描述符链扫描、主卷描述符（PVD）与补充卷描述符（Joliet SVD）解析
+- 目录记录解析（both-endian 校验、时间戳、`.` / `..`、多段文件合并）
 - 路径解析（大小写不敏感）与目录列举
-- 命令行 `info` / `ls`
+- 文件内容读取（跨扇区、多段文件、0 字节文件、越界拒绝）
+- Joliet（UCS-2，含代理对）与 Rock Ridge（NM / PX / SL / CE 续接区）
+- El Torito 启动目录（启动标志、平台、媒体类型、加载地址）
 
-规划中：
+写入：
 
-- 文件内容读取（`cat` / 提取）
-- Joliet（UCS-2 名称）与 Rock Ridge 扩展
-- 映像生成（写入侧）
+- 从目录树生成映像：ISO 9660 level 1 名字（自动 8.3 化与去重）+ Joliet + Rock Ridge
+- 可分别关闭 Joliet / Rock Ridge；L、M 路径表按规范生成
 
 ## 安装
 
@@ -26,47 +27,52 @@ moon add LL728/mooniso
 ## 命令行
 
 ```bash
-moon run cmd/main -- info tools/corpus/minimal.iso
-moon run cmd/main -- ls   tools/corpus/minimal.iso
-moon run cmd/main -- ls   tools/corpus/minimal.iso /SUB
-```
-
-输出示例：
-
-```text
-volume_id=MOONISO_TEST
-block_size=2048
-volume_space_size=24
-root_extent=20
-root_size=2048
-```
-
-```text
-HELLO.TXT	file	17	2026-01-02T03:04:05
-SUB	dir	2048	2026-01-02T03:04:05
+moon run cmd/main -- info    image.iso               # 卷信息 + 启动信息
+moon run cmd/main -- ls      image.iso /SUB          # 列目录
+moon run cmd/main -- cat     image.iso /HELLO.TXT    # 打印文本
+moon run cmd/main -- extract image.iso /BIG.BIN out  # 落盘（二进制安全）
+moon run cmd/main -- create  out.iso ./some-dir      # 从目录生成映像
 ```
 
 ## 库 API
 
 ```moonbit
+// 读
 let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes("image.iso"))
 println(image.volume_id())
 for entry in image.list_dir("/SUB") {
   println("\{entry.name}\t\{entry.size}")
 }
+let bytes = image.read_file("/HELLO.TXT")
+
+// 写
+let builder = @mooniso.IsoBuilder::new()
+builder.volume_id("MY_VOLUME")
+builder.add_directory("/Docs")
+builder.add_file("/Hello.txt", b"hi")
+let image_bytes = builder.build()
 ```
 
 ## 测试与对拍
 
 ```bash
-moon test --target wasm-gc          # 单元测试：字节序、目录记录、名称规范化
-python tools/gen_fixtures.py        # 生成 tools/corpus/minimal.iso
-python tools/check_e2e.py           # 用 CLI 读映像，与期望输出逐行比对
+moon test --target wasm-gc              # 单元测试：字节序、目录记录、Joliet、SUSP、El Torito、生成器回读
+python tools/gen_fixtures.py            # 生成 tools/corpus/*.iso（自身格式，可复现）
+python tools/check_e2e.py               # CLI 输出与期望逐行比对
+
+python tools/gen_fixtures_pycdlib.py    # 用 pycdlib 生成 Joliet/Rock Ridge/El Torito 映像与基准清单
+python tools/check_compat.py            # 读取侧与 pycdlib 对拍
+python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib 读回比对
 ```
 
-测试映像由标准库脚本按 ECMA-119 布局生成，并已用 **Windows CDFS 驱动挂载验证**
-（卷标、目录树、嵌套文件内容一致）。CI 在 Linux 上额外用内核 iso9660 驱动挂载同一映像，
-把挂载结果与 CLI 输出独立对照。
+对拍基线来自独立实现：**pycdlib**（Python）、**libarchive**、**Windows CDFS 驱动**、
+**Linux 内核 iso9660 驱动**（CI 中挂载后逐字节比对）。
+
+## 已知边界
+
+- 只支持 ISO 9660 level 1 名字映射（写入侧）；Rock Ridge 版本为 1.09
+- 不写 UDF、不写 El Torito 启动项（读取支持）
+- 目录数据超过 4 GiB、且无 Joliet/Rock Ridge 的极端映像未做专门优化
 
 ## 许可证
 

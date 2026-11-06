@@ -51,11 +51,30 @@ jobs:
       - name: 端到端对拍（CLI 输出）
         run: python3 tools/check_e2e.py
 
+      - name: 安装对拍用的独立实现（pycdlib）
+        run: python3 -m pip install --quiet pycdlib
+
+      - name: 生成 pycdlib 测试映像并导出基准清单
+        run: python3 tools/gen_fixtures_pycdlib.py
+
+      - name: 读取侧对拍（Joliet / Rock Ridge / El Torito）
+        run: python3 tools/check_compat.py
+
+      - name: 写入侧验收（pycdlib 读回生成的映像）
+        run: python3 tools/check_roundtrip.py --workdir /tmp/mooniso-rt
+
       # 内核 iso9660 驱动读同一份映像，作为独立实现与 CLI 交叉验证。
       # map=off：Linux 默认会把 ISO 名字转成小写，这里保留映像里的原始大小写。
-      - name: 内核挂载交叉验证
+      - name: 内核挂载交叉验证（读取侧）
         run: |
           sudo mkdir -p /mnt/mooniso
           sudo mount -o loop,ro,map=off -t iso9660 tools/corpus/minimal.iso /mnt/mooniso
           python3 tools/check_e2e.py --mount-point /mnt/mooniso
           sudo umount /mnt/mooniso
+
+      - name: 内核挂载交叉验证（写入侧：生成物挂载后逐字节比对）
+        run: |
+          sudo mkdir -p /mnt/mooniso-rt
+          sudo mount -o loop,ro,map=off /tmp/mooniso-rt/out.iso /mnt/mooniso-rt
+          python3 tools/check_roundtrip.py --verify-mount /mnt/mooniso-rt /tmp/mooniso-rt/src
+          sudo umount /mnt/mooniso-rt
