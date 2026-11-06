@@ -61,9 +61,17 @@ def check_error_path(failures):
         print("ok   ls-missing-path")
 
 
-def listdir_set(path, failures):
+def strip_version(name):
+    """去掉 ISO 9660 的 ;版本号：内核挂载(map=off)保留原始名字，本库对外给出的是去版本号的名字。"""
+    return name.split(";")[0]
+
+
+def listdir_set(path, failures, normalize=False):
     try:
-        return set(os.listdir(path))
+        names = set(os.listdir(path))
+        if normalize:
+            names = {strip_version(n) for n in names}
+        return names
     except OSError as exc:
         failures.append("无法列出 %s: %s" % (path, exc))
         return None
@@ -73,8 +81,8 @@ def check_mount(failures, mount_point):
     if not os.path.isdir(mount_point):
         failures.append("挂载点不存在: %s" % mount_point)
         return
-    root = listdir_set(mount_point, failures)
-    sub = listdir_set(os.path.join(mount_point, "SUB"), failures)
+    root = listdir_set(mount_point, failures, normalize=True)
+    sub = listdir_set(os.path.join(mount_point, "SUB"), failures, normalize=True)
     if root is None or sub is None:
         return
     cli_root = cli_names(["ls", "tools/corpus/minimal.iso"])
