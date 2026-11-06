@@ -20,13 +20,29 @@ fn usage() -> Unit {
 }
 
 ///|
-fn print_info(image : @mooniso.IsoImage) -> Unit {
+fn print_info(image : @mooniso.IsoImage) -> Unit raise @mooniso.IsoError {
   let root = image.root()
   println("volume_id=\{image.volume_id()}")
   println("block_size=\{image.block_size()}")
   println("volume_space_size=\{image.volume_space_size()}")
   println("root_extent=\{root.extent}")
   println("root_size=\{root.size}")
+  print_boot(image)
+}
+
+///|
+/// 打印 El Torito 启动信息（不可启动的映像什么都不打印）。
+fn print_boot(image : @mooniso.IsoImage) -> Unit raise @mooniso.IsoError {
+  match image.boot_info() {
+    Some(info) => {
+      println("bootable=\{info.bootable}")
+      println("boot_platform=\{info.platform_id}")
+      println("boot_media=\{info.media_type}")
+      println("boot_sectors=\{info.sector_count}")
+      println("boot_load_lba=\{info.load_lba}")
+    }
+    None => ()
+  }
 }
 
 ///|
@@ -35,9 +51,20 @@ fn print_listing(
   path : String,
 ) -> Unit raise @mooniso.IsoError {
   for entry in image.list_dir(path) {
-    let kind = if entry.is_dir() { "dir" } else { "file" }
+    let kind = if entry.is_dir() {
+      "dir"
+    } else if entry.is_symlink() {
+      "link"
+    } else {
+      "file"
+    }
+    let suffix = match entry.symlink_target {
+      Some(target) => "\t-> \{target}"
+      None => ""
+    }
     println(
-      "\{entry.name}\t\{kind}\t\{entry.size}\t\{entry.date.to_iso_string()}",
+      "\{entry.name}\t\{kind}\t\{entry.size}\t\{entry.date.to_iso_string()}" +
+      suffix,
     )
   }
 }
@@ -94,6 +121,7 @@ fn main {
     @mooniso.IsoError::NotDirectory(p) =>
       println("ERROR\tnot a directory: \{p}")
     @mooniso.IsoError::IsDirectory(p) => println("ERROR\tis a directory: \{p}")
+    @mooniso.IsoError::IsSymlink(p) => println("ERROR\tis a symlink: \{p}")
     @mooniso.IsoError::BadDirectoryRecord(len) =>
       println("ERROR\tbad directory record (\{len} bytes)")
     @fs.IOError::IOError(msg) => println("ERROR\tI/O: \{msg}")

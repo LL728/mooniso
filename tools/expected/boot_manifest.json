@@ -1,0 +1,7 @@
+{
+  "bootable": true,
+  "load_lba": 26,
+  "media_type": 0,
+  "platform_id": 0,
+  "sector_count": 4
+}

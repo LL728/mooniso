@@ -18,7 +18,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPECTED = os.path.join(ROOT, "tools", "expected")
 
 # (映像, pycdlib 基准清单)
-CASES = [("joliet.iso", "joliet_manifest.json")]
+CASES = [
+    ("joliet.iso", "joliet_manifest.json"),
+    ("rockridge.iso", "rockridge_manifest.json"),
+]
+
+# El Torito 启动项基准（由 pycdlib 导出）
+BOOT_CASE = ("boot.iso", "boot_manifest.json")
 
 
 def run_cli(args):
@@ -37,9 +43,42 @@ def cli_entries(image, directory):
     for line in run_cli(["ls", image, directory]).splitlines():
         if not line:
             continue
-        name, kind, size, _stamp = line.split("\t")
-        out.append({"name": name, "is_dir": kind == "dir", "size": int(size)})
+        fields = line.split("\t")
+        name, kind, size = fields[0], fields[1], int(fields[2])
+        out.append(
+            {
+                "name": name,
+                "is_dir": kind == "dir",
+                "is_symlink": kind == "link",
+                "size": size,
+            }
+        )
     return sorted(out, key=lambda e: e["name"])
+
+
+def check_boot(failures):
+    image, manifest_name = BOOT_CASE
+    with open(os.path.join(EXPECTED, manifest_name), encoding="utf-8") as f:
+        want = json.load(f)
+    got = {}
+    for line in run_cli(["info", "tools/corpus/" + image]).splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            got[key] = value
+    if got.get("bootable") != str(want["bootable"]).lower():
+        failures.append("bootable 不一致: cli=%s pycdlib=%s" % (got.get("bootable"), want["bootable"]))
+    for cli_key, want_key in (
+        ("boot_platform", "platform_id"),
+        ("boot_media", "media_type"),
+        ("boot_sectors", "sector_count"),
+        ("boot_load_lba", "load_lba"),
+    ):
+        if got.get(cli_key) != str(want[want_key]):
+            failures.append(
+                "%s 不一致: cli=%s pycdlib=%s" % (cli_key, got.get(cli_key), want[want_key])
+            )
+    if not failures:
+        print("ok   %s boot catalog matches pycdlib" % image)
 
 
 def main():
@@ -61,6 +100,7 @@ def main():
             else:
                 checked += 1
                 print("ok   %s %s (%d entries)" % (image, path, len(got)))
+    check_boot(failures)
     if failures:
         print("\n".join(failures))
         print("FAILED")

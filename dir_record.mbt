@@ -47,15 +47,25 @@ pub struct DirectoryRecord {
   extent : Int32
   size : Int32
   flags : Int32
-  name : String
+  mut name : String
   date : RecordDate
   /// system use area 原始字节（Rock Ridge / SUSP 扩展放这里）；没有则为空。
   system_use : Bytes
+  /// POSIX mode（Rock Ridge PX）；没有则为 None
+  mut posix_mode : Int32?
+  /// 符号链接目标（Rock Ridge SL）；没有则为 None
+  mut symlink_target : String?
 }
 
 ///|
 pub fn DirectoryRecord::is_dir(self : DirectoryRecord) -> Bool {
   (self.flags & 2) != 0
+}
+
+///|
+/// 是否为 Rock Ridge 符号链接。
+pub fn DirectoryRecord::is_symlink(self : DirectoryRecord) -> Bool {
+  self.symlink_target is Some(_)
 }
 
 ///|
@@ -150,6 +160,8 @@ pub fn parse_directory_record_in(
           gmt_offset_quarters: 0,
         },
         system_use: Bytes::new(0),
+        posix_mode: None,
+        symlink_target: None,
       },
       0,
     )
@@ -213,6 +225,8 @@ pub fn parse_directory_record_in(
         gmt_offset_quarters: gmt,
       },
       system_use,
+      posix_mode: None,
+      symlink_target: None,
     },
     len,
   )

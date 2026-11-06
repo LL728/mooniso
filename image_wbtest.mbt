@@ -58,9 +58,12 @@ fn synthetic_image() -> IsoImage {
       name: "",
       date: date_fixture(),
       system_use: Bytes::new(0),
+      posix_mode: None,
+      symlink_target: None,
     },
     joliet_root: None,
     joliet_level: 0,
+    rock_ridge: false,
   }
 }
 

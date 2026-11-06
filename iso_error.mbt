@@ -11,5 +11,6 @@ pub suberror IsoError {
   NotFound(String)
   NotDirectory(String)
   IsDirectory(String)
+  IsSymlink(String)
   BadDirectoryRecord(Int32)
 }

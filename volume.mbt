@@ -47,7 +47,7 @@ pub fn scan_volume_descriptors(
     if dtype == 255 {
       break
     }
-    if dtype != 0 {
+    if dtype != 255 {
       out.push((dtype, lba))
     }
     lba += 1
@@ -143,4 +143,77 @@ pub fn find_joliet_descriptor(data : Bytes) -> JolietDescriptor? raise IsoError 
     }
   }
   None
+}
+
+///|
+/// El Torito 启动信息（从启动目录里读出的第一个启动项）。
+pub struct BootInfo {
+  catalog_lba : Int32
+  platform_id : Int32
+  bootable : Bool
+  media_type : Int32
+  load_segment : Int32
+  sector_count : Int32
+  load_lba : Int32
+}
+
+///|
+/// 在卷描述符链里找启动记录卷描述符（类型 0），返回启动目录所在的逻辑块号。
+pub fn find_boot_catalog_lba(data : Bytes) -> Int32? raise IsoError {
+  for entry in scan_volume_descriptors(data) {
+    let dtype = entry.0
+    let lba = entry.1
+    if dtype != 0 {
+      continue
+    }
+    let r = read_sector(data, lba)
+    // El Torito: 启动目录指针是单端小端 4 字节，不是 both-endian
+    r.seek(lba * SECTOR_SIZE + 71)
+    return Some(r.read_u32_le())
+  }
+  None
+}
+
+///|
+/// 解析 El Torito 启动目录：校验项 + 第一个启动项。
+pub fn parse_boot_catalog(
+  data : Bytes,
+  catalog_lba : Int32,
+) -> BootInfo raise IsoError {
+  let r = read_sector(data, catalog_lba)
+  r.seek(catalog_lba * SECTOR_SIZE)
+  // 校验项：0x01 + 平台号 + 24 字节标识 + 校验和(2) + 55 AA
+  let header_id = r.read_u8().reinterpret_as_int()
+  if header_id != 0x01 {
+    raise BadDescriptor(header_id)
+  }
+  let platform_id = r.read_u8().reinterpret_as_int()
+  r.skip(2) // 保留
+  r.skip(24) // 标识串
+  let _checksum = r.read_u16_le()
+  let key0 = r.read_u8().reinterpret_as_int()
+  let key1 = r.read_u8().reinterpret_as_int()
+  if key0 != 0x55 || key1 != 0xAA {
+    raise BadDescriptor(key0)
+  }
+  // 启动项
+  let boot_indicator = r.read_u8().reinterpret_as_int()
+  let media_type = r.read_u8().reinterpret_as_int()
+  let load_segment = r.read_u16_le()
+  let _system_type = r.read_u8().reinterpret_as_int()
+  let _unused = r.read_u8().reinterpret_as_int()
+  let sector_count = r.read_u16_le()
+  let load_lba = r.read_u32_le()
+  if boot_indicator != 0x88 && boot_indicator != 0x00 {
+    raise BadDescriptor(boot_indicator)
+  }
+  BootInfo::{
+    catalog_lba,
+    platform_id,
+    bootable: boot_indicator == 0x88,
+    media_type,
+    load_segment,
+    sector_count,
+    load_lba,
+  }
 }

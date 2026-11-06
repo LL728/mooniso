@@ -13,6 +13,8 @@ pub struct IsoImage {
   /// Joliet 补充卷描述符的根目录；存在时默认使用它的名字（UCS-2）。
   joliet_root : DirectoryRecord?
   joliet_level : Int32
+  /// 映像是否带 Rock Ridge 扩展（优先于 Joliet 使用它的名字与属性）。
+  rock_ridge : Bool
 }
 
 ///|
@@ -40,6 +42,7 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
     Some(d) => d.level
     None => 0
   }
+  let rock_ridge = detect_rock_ridge(data, pvd.logical_block_size, pvd.root)
   IsoImage::{
     data,
     volume_id: pvd.volume_id,
@@ -51,7 +54,22 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
       None => None
     },
     joliet_level,
+    rock_ridge,
   }
+}
+
+///|
+/// Rock Ridge 的 SP 条目只出现在根目录的「.」记录里，用它判断映像是否带 RR 扩展。
+fn detect_rock_ridge(
+  data : Bytes,
+  block_size : Int32,
+  root : DirectoryRecord,
+) -> Bool raise IsoError {
+  let reader = ByteReader::new(data)
+  reader.seek(root.extent * block_size)
+  let (first, _) = parse_directory_record_in(reader, false)
+  let info = parse_rock_ridge(data, block_size, first.system_use)
+  info.present
 }
 
 ///|
@@ -81,6 +99,21 @@ pub fn IsoImage::uses_joliet(self : IsoImage) -> Bool {
 }
 
 ///|
+/// El Torito 启动信息；映像不可启动时为 None。
+pub fn IsoImage::boot_info(self : IsoImage) -> BootInfo? raise IsoError {
+  match find_boot_catalog_lba(self.data) {
+    Some(lba) => Some(parse_boot_catalog(self.data, lba))
+    None => None
+  }
+}
+
+///|
+/// 映像是否带 Rock Ridge 扩展。
+pub fn IsoImage::has_rock_ridge(self : IsoImage) -> Bool {
+  self.rock_ridge
+}
+
+///|
 /// Joliet 级别（1/2/3），无 Joliet 时为 0。
 pub fn IsoImage::joliet_level(self : IsoImage) -> Int32 {
   self.joliet_level
@@ -89,6 +122,10 @@ pub fn IsoImage::joliet_level(self : IsoImage) -> Int32 {
 ///|
 /// 当前生效的根目录：有 Joliet 用 Joliet 树，否则用主卷树。
 fn IsoImage::active_root(self : IsoImage) -> DirectoryRecord {
+  // Rock Ridge 的名字挂在主卷记录上，优先级高于 Joliet
+  if self.rock_ridge {
+    return self.root
+  }
   match self.joliet_root {
     Some(root) => root
     None => self.root
@@ -131,7 +168,11 @@ fn IsoImage::read_directory(
   self : IsoImage,
   dir : DirectoryRecord,
 ) -> Array[DirectoryRecord] raise IsoError {
-  self.read_directory_in(dir, self.uses_joliet())
+  self.read_directory_in(
+    dir,
+    self.uses_joliet() && !self.rock_ridge,
+    self.rock_ridge,
+  )
 }
 
 ///|
@@ -140,6 +181,7 @@ fn IsoImage::read_directory_in(
   self : IsoImage,
   dir : DirectoryRecord,
   joliet : Bool,
+  rr : Bool,
 ) -> Array[DirectoryRecord] raise IsoError {
   if !dir.is_dir() {
     raise NotDirectory(dir.name)
@@ -153,7 +195,18 @@ fn IsoImage::read_directory_in(
   reader.seek(start)
   let out : Array[DirectoryRecord] = []
   while reader.position() < end {
-    let (record, len) = parse_directory_record_in(reader, joliet)
+    let (parsed, len) = parse_directory_record_in(reader, joliet)
+    let record = parsed
+    if len > 0 && rr {
+      // Rock Ridge：替代名字、POSIX 属性、符号链接
+      let info = parse_rock_ridge(self.data, self.block_size, record.system_use)
+      match info.name {
+        Some(alt) => record.name = alt
+        None => ()
+      }
+      record.posix_mode = info.mode
+      record.symlink_target = info.symlink
+    }
     if len == 0 {
       // 填充：跳到下一个扇区边界
       let next = (reader.position() / SECTOR_SIZE + 1) * SECTOR_SIZE
@@ -201,6 +254,8 @@ pub fn IsoImage::list_dir(
         name: r.name,
         date: r.date,
         system_use: r.system_use,
+        posix_mode: r.posix_mode,
+        symlink_target: r.symlink_target,
       })
       i = j
     } else {
@@ -284,6 +339,9 @@ pub fn IsoImage::read_file(
   let records = self.find_records(path)
   if records[0].is_dir() {
     raise IsDirectory(path)
+  }
+  if records[0].is_symlink() {
+    raise IsSymlink(path)
   }
   let mut total = 0
   for r in records {
