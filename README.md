@@ -18,6 +18,13 @@
 - 从目录树生成映像：ISO 9660 level 1 名字（自动 8.3 化与去重）+ Joliet + Rock Ridge
 - 可分别关闭 Joliet / Rock Ridge；L、M 路径表按规范生成
 
+## 演示
+
+![demo](docs/demo/poster.png)
+
+终端动画演示（真实命令、真实输出）：[docs/demo/mooniso-demo.mp4](docs/demo/mooniso-demo.mp4)，
+可用 `python tools/make_demo_video.py` 重新生成。
+
 ## 安装
 
 ```bash
