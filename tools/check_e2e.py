@@ -61,12 +61,22 @@ def check_error_path(failures):
         print("ok   ls-missing-path")
 
 
+def listdir_set(path, failures):
+    try:
+        return set(os.listdir(path))
+    except OSError as exc:
+        failures.append("无法列出 %s: %s" % (path, exc))
+        return None
+
+
 def check_mount(failures, mount_point):
     if not os.path.isdir(mount_point):
         failures.append("挂载点不存在: %s" % mount_point)
         return
-    root = set(os.listdir(mount_point))
-    sub = set(os.listdir(os.path.join(mount_point, "SUB")))
+    root = listdir_set(mount_point, failures)
+    sub = listdir_set(os.path.join(mount_point, "SUB"), failures)
+    if root is None or sub is None:
+        return
     cli_root = cli_names(["ls", "tools/corpus/minimal.iso"])
     cli_sub = cli_names(["ls", "tools/corpus/minimal.iso", "/SUB"])
     if root != MOUNT_ENTRIES:

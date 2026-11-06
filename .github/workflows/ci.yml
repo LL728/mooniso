@@ -51,10 +51,11 @@ jobs:
       - name: 端到端对拍（CLI 输出）
         run: python3 tools/check_e2e.py
 
-      # 内核 iso9660 驱动读同一份映像，作为独立实现与 CLI 交叉验证
+      # 内核 iso9660 驱动读同一份映像，作为独立实现与 CLI 交叉验证。
+      # map=off：Linux 默认会把 ISO 名字转成小写，这里保留映像里的原始大小写。
       - name: 内核挂载交叉验证
         run: |
           sudo mkdir -p /mnt/mooniso
-          sudo mount -o loop,ro -t iso9660 tools/corpus/minimal.iso /mnt/mooniso
+          sudo mount -o loop,ro,map=off -t iso9660 tools/corpus/minimal.iso /mnt/mooniso
           python3 tools/check_e2e.py --mount-point /mnt/mooniso
           sudo umount /mnt/mooniso
