@@ -37,12 +37,12 @@ MOUNT_CASES = {
 }
 
 
-def run_cli(args):
+def run_cli(args, expect_failure=False):
     cmd = ["moon", "run", "--target", "js", "cmd/main", "--"] + args
     proc = subprocess.run(
         cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
-    if proc.returncode != 0:
+    if proc.returncode != 0 and not expect_failure:
         print("CLI 退出码 %d: %s" % (proc.returncode, proc.stderr.strip()))
         sys.exit(2)
     return proc.stdout
@@ -102,12 +102,16 @@ def check_extract(failures):
 
 
 def check_error_paths(failures):
-    got = run_cli(["ls", "tools/corpus/minimal.iso", "/nope"])
+    # 失败路径现在返回非零退出码（CLI 约定），期望失败的命令要显式声明
+    got = run_cli(["ls", "tools/corpus/minimal.iso", "/nope"], expect_failure=True)
     if not got.startswith("ERROR\tno such path"):
         failures.append("缺失路径应报错，实际输出: %r" % got)
     else:
         print("ok   ls-missing-path")
-    got = run_cli(["extract", "tools/corpus/minimal.iso", "/SUB", os.devnull])
+    got = run_cli(
+        ["extract", "tools/corpus/minimal.iso", "/SUB", os.devnull],
+        expect_failure=True,
+    )
     if not got.startswith("ERROR\tis a directory"):
         failures.append("读取目录应报错，实际输出: %r" % got)
     else:
