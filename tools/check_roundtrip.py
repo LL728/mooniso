@@ -121,11 +121,13 @@ def check_symlink(failures):
         iso = pycdlib.PyCdlib()
         iso.open(image)
         try:
-            links = [
-                (child, child.rock_ridge.symlink_path())
-                for child in iso.list_children(rr_path="/")
-                if child.is_symlink()
-            ]
+            links = []
+            for child in iso.list_children(rr_path="/"):
+                if child.is_symlink():
+                    target = child.rock_ridge.symlink_path()
+                    if isinstance(target, bytes):
+                        target = target.decode("utf-8", "replace")
+                    links.append((child, target))
             if len(links) != 1:
                 failures.append("符号链接数量不符: %d" % len(links))
             elif links[0][1] != "/hello.txt":
