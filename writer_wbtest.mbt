@@ -98,3 +98,24 @@ test "a non-bootable image reports no boot info" {
   let image = IsoImage::open(builder.build())
   assert_true(image.boot_info() is None)
 }
+
+///|
+test "builder can add a UEFI section entry" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("DUALBOOT")
+  builder.add_file("/boot.bin", Bytes::make(2048, b'\x00'))
+  builder.add_file("/efi.img", Bytes::make(4096, b'\x00'))
+  builder.boot_image("/boot.bin", 4, 0)
+  builder.boot_image_efi("/efi.img", 4)
+  let image = IsoImage::open(builder.build())
+  match image.boot_info() {
+    Some(info) => {
+      assert_eq(info.entries.length(), 2)
+      assert_eq(info.entries[0].platform_id, 0)
+      assert_eq(info.entries[1].platform_id, 0xEF)
+      assert_eq(info.entries[1].sector_count, 4)
+      assert_true(info.entries[1].load_lba > 0)
+    }
+    None => assert_true(false)
+  }
+}

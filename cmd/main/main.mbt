@@ -40,6 +40,12 @@ fn print_boot(image : @mooniso.IsoImage) -> Unit raise @mooniso.IsoError {
       println("boot_media=\{info.media_type}")
       println("boot_sectors=\{info.sector_count}")
       println("boot_load_lba=\{info.load_lba}")
+      for i = 1; i < info.entries.length(); i = i + 1 {
+        let entry = info.entries[i]
+        println(
+          "boot_entry_\{i}=platform=\{entry.platform_id},sectors=\{entry.sector_count},load_lba=\{entry.load_lba}",
+        )
+      }
     }
     None => ()
   }
@@ -225,6 +231,7 @@ fn create_image(
   out_path : String,
   src_dir : String,
   boot_path : String?,
+  efi_path : String?,
 ) -> Unit raise @mooniso.IsoError {
   let builder = @mooniso.IsoBuilder::new()
   builder.volume_id("MOONISO")
@@ -233,6 +240,13 @@ fn create_image(
     Some(path) => {
       builder.boot_image(path, 4, 0)
       println("boot image: \{path}")
+    }
+    None => ()
+  }
+  match efi_path {
+    Some(path) => {
+      builder.boot_image_efi(path, 4)
+      println("efi image: \{path}")
     }
     None => ()
   }
@@ -260,12 +274,16 @@ fn main {
         return
       }
       let mut boot : String? = None
+      let mut efi : String? = None
       for i = base + 3; i + 1 < args.length(); i = i + 1 {
         if args[i] == "--boot" {
           boot = Some(args[i + 1])
         }
+        if args[i] == "--efi" {
+          efi = Some(args[i + 1])
+        }
       }
-      create_image(args[base + 1], args[base + 2], boot)
+      create_image(args[base + 1], args[base + 2], boot, efi)
       return
     }
     if command != "info" &&

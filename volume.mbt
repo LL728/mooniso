@@ -147,6 +147,15 @@ pub fn find_joliet_descriptor(data : Bytes) -> JolietDescriptor? raise IsoError 
 
 ///|
 /// El Torito 启动信息（从启动目录里读出的第一个启动项）。
+pub struct BootEntry {
+  platform_id : Int32
+  bootable : Bool
+  media_type : Int32
+  sector_count : Int32
+  load_lba : Int32
+}
+
+///|
 pub struct BootInfo {
   catalog_lba : Int32
   platform_id : Int32
@@ -155,6 +164,8 @@ pub struct BootInfo {
   load_segment : Int32
   sector_count : Int32
   load_lba : Int32
+  /// 启动目录里其余条目（UEFI 等通过 section header 挂在这里）
+  entries : Array[BootEntry]
 }
 
 ///|
@@ -207,6 +218,49 @@ pub fn parse_boot_catalog(
   if boot_indicator != 0x88 && boot_indicator != 0x00 {
     raise BadDescriptor(boot_indicator)
   }
+  let entries : Array[BootEntry] = [
+    BootEntry::{
+      platform_id,
+      bootable: boot_indicator == 0x88,
+      media_type,
+      sector_count,
+      load_lba,
+    },
+  ]
+  // 可选 section header：0x90（最后一个）/ 0x91（后面还有），平台号与条目数在头部
+  let mut cursor = catalog_lba * SECTOR_SIZE + 64
+  while cursor + 32 <= (catalog_lba + 1) * SECTOR_SIZE &&
+        cursor + 32 <= data.length() {
+    let header = data[cursor].to_uint().reinterpret_as_int()
+    if header != 0x90 && header != 0x91 {
+      break
+    }
+    let section_platform = data[cursor + 1].to_uint().reinterpret_as_int()
+    let count = data[cursor + 2].to_uint().reinterpret_as_int() |
+      (data[cursor + 3].to_uint().reinterpret_as_int() << 8)
+    cursor += 32
+    for _i = 0; _i < count; _i = _i + 1 {
+      if cursor + 32 > data.length() {
+        break
+      }
+      let indicator = data[cursor].to_uint().reinterpret_as_int()
+      let media = data[cursor + 1].to_uint().reinterpret_as_int()
+      let sectors = data[cursor + 6].to_uint().reinterpret_as_int() |
+        (data[cursor + 7].to_uint().reinterpret_as_int() << 8)
+      let load = read_u32_le_at(data, cursor + 8)
+      entries.push(BootEntry::{
+        platform_id: section_platform,
+        bootable: indicator == 0x88,
+        media_type: media,
+        sector_count: sectors,
+        load_lba: load,
+      })
+      cursor += 32
+    }
+    if header == 0x90 {
+      break
+    }
+  }
   BootInfo::{
     catalog_lba,
     platform_id,
@@ -215,5 +269,15 @@ pub fn parse_boot_catalog(
     load_segment,
     sector_count,
     load_lba,
+    entries,
   }
+}
+
+///|
+/// 从字节流指定偏移读小端 32 位。
+fn read_u32_le_at(data : Bytes, offset : Int32) -> Int32 {
+  data[offset].to_uint().reinterpret_as_int() |
+  (data[offset + 1].to_uint().reinterpret_as_int() << 8) |
+  (data[offset + 2].to_uint().reinterpret_as_int() << 16) |
+  (data[offset + 3].to_uint().reinterpret_as_int() << 24)
 }

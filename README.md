@@ -11,13 +11,13 @@
 - 路径解析（大小写不敏感）与目录列举
 - 文件内容读取（跨扇区、多段文件、0 字节文件、越界拒绝）
 - Joliet（UCS-2，含代理对）与 Rock Ridge（NM / PX / SL / CE 续接区）
-- El Torito 启动目录（启动标志、平台、媒体类型、加载地址）
+- El Torito 启动目录（启动标志、平台、媒体类型、加载地址、UEFI section header）
 - **UDF（ECMA-167）读取**：Anchor、描述符序列、File Set、File Entry、FID（含 UTF-16 名字）
 
 写入：
 
 - 从目录树生成映像：ISO 9660 level 1 名字（自动 8.3 化与去重）+ Joliet + Rock Ridge
-- 可生成 **El Torito 可启动映像**（启动记录卷描述符 + 启动目录 + 校验和）
+- 可生成 **El Torito 可启动映像**：BIOS 启动项 + UEFI section header（双启动），含校验和
 - 可分别关闭 Joliet / Rock Ridge；L、M 路径表按规范生成
 
 ## 演示
@@ -46,7 +46,7 @@ moon run cmd/main -- verify  image.iso               # 结构体检
 moon run cmd/main -- udf-ls  image.iso /Docs         # 走 UDF 视角列目录
 moon run cmd/main -- udf-cat image.iso /hello.txt    # 走 UDF 视角读文件
 moon run cmd/main -- create  out.iso ./some-dir      # 从目录生成映像
-moon run cmd/main -- create  out.iso ./some-dir --boot /boot.bin   # 生成可启动映像
+moon run cmd/main -- create  out.iso ./some-dir --boot /boot.bin --efi /efi.img   # BIOS+UEFI 双启动
 ```
 
 最小可运行示例：
@@ -94,7 +94,7 @@ python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib
 
 - 只支持 ISO 9660 level 1 名字映射（写入侧）；Rock Ridge 版本为 1.09
 - UDF 只读：不支持 VAT（多区段写入）、元数据分区与 >4 GiB 的单个文件
-- 写入侧不生成 UDF；可生成 El Torito 启动项（无仿真，UEFI 启动项未写）
+- 写入侧不生成 UDF；El Torito 只写单个 UEFI section（多 section / 启动信息表未写）
 
 ## 许可证
 

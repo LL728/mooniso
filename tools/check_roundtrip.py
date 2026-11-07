@@ -120,6 +120,27 @@ def check_bootable(failures):
             f.write(b"bootable\n")
         image = os.path.join(tmp, "boot.iso")
         run_cli(["create", image, tmp, "--boot", "/boot.bin"])
+        with open(os.path.join(tmp, "efi.img"), "wb") as f:
+            f.write(bytes(4096))
+        dual = os.path.join(tmp, "dual.iso")
+        run_cli(["create", dual, tmp, "--boot", "/boot.bin", "--efi", "/efi.img"])
+        iso = pycdlib.PyCdlib()
+        iso.open(dual)
+        try:
+            catalog = iso.eltorito_boot_catalog
+            sections = catalog.sections
+            efi_ok = (
+                len(sections) == 1
+                and sections[0].platform_id == 0xEF
+                and len(sections[0].section_entries) == 1
+                and sections[0].section_entries[0].boot_indicator == 0x88
+            )
+            if not efi_ok:
+                failures.append("UEFI section header 与期望不符: sections=%d" % len(sections))
+            else:
+                print("ok   UEFI section header（平台 0xEF）被试独立实现识别")
+        finally:
+            iso.close()
         iso = pycdlib.PyCdlib()
         iso.open(image)
         try:

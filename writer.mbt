@@ -15,6 +15,8 @@ pub struct IsoBuilder {
   mut rock_ridge : Bool
   /// El Torito 启动映像在映像内的路径；None 表示不生成启动项
   mut boot_path : String?
+  /// EFI 启动映像路径（作为 section header 里的条目）；None 表示不生成
+  mut efi_path : String?
   /// 启动映像需要加载的扇区数（写进启动目录）
   mut boot_load_sectors : Int32
   mut boot_platform : Int32
@@ -29,11 +31,26 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     joliet: true,
     rock_ridge: true,
     boot_path: None,
+    efi_path: None,
     boot_load_sectors: 4,
     boot_platform: 0,
     dirs: ["/"],
     files: [],
   }
+}
+
+///|
+/// 追加一个 UEFI 启动项（写入启动目录的 section header，平台 0xEF）。
+pub fn IsoBuilder::boot_image_efi(
+  self : IsoBuilder,
+  path : String,
+  load_sectors : Int32,
+) -> Unit {
+  self.efi_path = Some(normalize_path(path))
+  if self.boot_path is None {
+    self.boot_path = Some(normalize_path(path))
+  }
+  self.boot_load_sectors = load_sectors
 }
 
 ///|
@@ -527,7 +544,8 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   // 布局：卷描述符 -> 路径表 -> ISO 目录 -> Joliet 目录 -> 文件内容
   // 描述符顺序：PVD(16) -> 启动记录(17，El Torito 要求紧跟 PVD) -> 补充卷 -> 结束符
   let mut descriptor_lba = 17
-  let boot_record_lba = if self.boot_path is Some(_) {
+  let has_boot = self.boot_path is Some(_) || self.efi_path is Some(_)
+  let boot_record_lba = if has_boot {
     let lba = descriptor_lba
     descriptor_lba += 1
     lba
@@ -580,7 +598,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
     cursor += ceil_sectors(files[f].size, sector)
   }
   let mut boot_catalog_lba = -1
-  if self.boot_path is Some(_) {
+  if has_boot {
     boot_catalog_lba = cursor
     cursor += 1
   }
@@ -617,19 +635,30 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   for f = 0; f < files.length(); f = f + 1 {
     write_at(files[f].lba, files[f].data)
   }
-  if self.boot_path is Some(path) {
-    let mut boot_lba = -1
-    for f = 0; f < files.length(); f = f + 1 {
-      if files[f].path == path {
-        boot_lba = files[f].lba
+  if has_boot {
+    let find_lba = fn(path : String) -> Int32 raise IsoError {
+      let mut found = -1
+      for f = 0; f < files.length(); f = f + 1 {
+        if files[f].path == path {
+          found = files[f].lba
+        }
       }
+      if found < 0 {
+        raise NotFound(path)
+      }
+      found
     }
-    if boot_lba < 0 {
-      raise NotFound(path)
+    let bios = match self.boot_path {
+      Some(path) => Some((find_lba(path), self.boot_load_sectors))
+      None => None
+    }
+    let efi = match self.efi_path {
+      Some(path) => Some((find_lba(path), self.boot_load_sectors))
+      None => None
     }
     write_at(
       boot_catalog_lba,
-      boot_catalog_sector(boot_lba, self.boot_load_sectors, self.boot_platform),
+      boot_catalog_sector(bios, efi, self.boot_platform),
     )
     write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
   }
@@ -1063,13 +1092,18 @@ fn boot_record_sector(catalog_lba : Int32) -> Bytes {
 ///|
 /// El Torito 启动目录：校验项（含校验和）+ 默认启动项。
 fn boot_catalog_sector(
-  boot_lba : Int32,
-  load_sectors : Int32,
+  bios : (Int32, Int32)?,
+  efi : (Int32, Int32)?,
   platform : Int32,
 ) -> Bytes {
   let sector = FixedArray::make(SECTOR_SIZE, b'\x00')
   sector[0] = b'\x01'
-  sector[1] = platform.to_byte()
+  // 没有 BIOS 启动项时，校验项的平台号用 EFI（0xEF）
+  let header_platform = match bios {
+    Some(_) => platform
+    None => 0xEF
+  }
+  sector[1] = header_platform.to_byte()
   let id = ascii_bytes("mooniso boot")
   for i = 0; i < id.length(); i = i + 1 {
     sector[4 + i] = id[i]
@@ -1088,13 +1122,56 @@ fn boot_catalog_sector(
   sector[28] = (checksum & 0xFF).to_byte()
   sector[29] = ((checksum >> 8) & 0xFF).to_byte()
   // 默认启动项：可启动、无仿真、加载扇区数与加载地址
-  sector[32] = b'\x88'
-  sector[33] = b'\x00'
-  sector[38] = (load_sectors & 0xFF).to_byte()
-  sector[39] = ((load_sectors >> 8) & 0xFF).to_byte()
-  sector[40] = (boot_lba & 0xFF).to_byte()
-  sector[41] = ((boot_lba >> 8) & 0xFF).to_byte()
-  sector[42] = ((boot_lba >> 16) & 0xFF).to_byte()
-  sector[43] = ((boot_lba >> 24) & 0xFF).to_byte()
+  let default_entry = match bios {
+    Some(pair) => Some(pair)
+    None => efi
+  }
+  match default_entry {
+    Some(pair) => {
+      let (lba, sectors) = pair
+      sector[32] = b'\x88'
+      sector[33] = b'\x00'
+      sector[38] = (sectors & 0xFF).to_byte()
+      sector[39] = ((sectors >> 8) & 0xFF).to_byte()
+      sector[40] = (lba & 0xFF).to_byte()
+      sector[41] = ((lba >> 8) & 0xFF).to_byte()
+      sector[42] = ((lba >> 16) & 0xFF).to_byte()
+      sector[43] = ((lba >> 24) & 0xFF).to_byte()
+    }
+    None => ()
+  }
+  // UEFI：section header（0x90 = 最后一个，平台 0xEF）+ 一个条目
+  match (bios, efi) {
+    (Some(_), Some(pair)) => {
+      let (lba, sectors) = pair
+      let base = 64
+      sector[base] = b'\x90'
+      sector[base + 1] = b'\xEF'
+      sector[base + 2] = b'\x01'
+      sector[base + 3] = b'\x00'
+      let sid = ascii_bytes("EFI")
+      for i = 0; i < sid.length(); i = i + 1 {
+        sector[base + 4 + i] = sid[i]
+      }
+      let mut header_sum = 0
+      for i = 0; i < 16; i = i + 1 {
+        let lo = sector[base + i * 2].to_uint().reinterpret_as_int()
+        let hi = sector[base + i * 2 + 1].to_uint().reinterpret_as_int()
+        header_sum = (header_sum + (lo | (hi << 8))) & 0xFFFF
+      }
+      let header_checksum = (0x10000 - header_sum) & 0xFFFF
+      sector[base + 28] = (header_checksum & 0xFF).to_byte()
+      sector[base + 29] = ((header_checksum >> 8) & 0xFF).to_byte()
+      sector[base + 32] = b'\x88'
+      sector[base + 33] = b'\x00'
+      sector[base + 38] = (sectors & 0xFF).to_byte()
+      sector[base + 39] = ((sectors >> 8) & 0xFF).to_byte()
+      sector[base + 40] = (lba & 0xFF).to_byte()
+      sector[base + 41] = ((lba >> 8) & 0xFF).to_byte()
+      sector[base + 42] = ((lba >> 16) & 0xFF).to_byte()
+      sector[base + 43] = ((lba >> 24) & 0xFF).to_byte()
+    }
+    _ => ()
+  }
   Bytes::from_array(sector[:])
 }
