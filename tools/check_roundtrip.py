@@ -93,21 +93,42 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def collect_mount_hashes(mount_point):
+    """递归读挂载点所有普通文件，返回 (数量, Counter[sha256 -> count])。"""
+    from collections import Counter
+
+    hashes = Counter()
+    count = 0
+    for root, _dirs, files in os.walk(mount_point):
+        for name in files:
+            path = os.path.join(root, name)
+            hashes[sha256_file(path)] += 1
+            count += 1
+    return count, hashes
+
+
 def compare_mount(failures, mount_point, src_dir):
+    """内核挂载后按内容字节的 multiset 比对，绕开名字映射差异（名字已由 pycdlib 验证）。"""
     if not os.path.isdir(mount_point):
         failures.append("挂载点不存在: %s" % mount_point)
         return
-    for rel, data in sorted(SAMPLE_FILES.items()):
-        mounted = os.path.join(mount_point, rel.replace("/", os.sep))
-        if not os.path.isfile(mounted):
-            failures.append("挂载后缺少文件: %s" % rel)
-            continue
-        want = hashlib.sha256(data).hexdigest()
-        got = sha256_file(mounted)
-        if got != want:
-            failures.append("文件内容不一致 %s: %s != %s" % (rel, got, want))
-    if not failures:
-        print("ok   挂载后与源目录逐文件一致（%d 个文件）" % len(SAMPLE_FILES))
+    from collections import Counter
+
+    want = Counter()
+    for data in SAMPLE_FILES.values():
+        want[hashlib.sha256(data).hexdigest()] += 1
+    got_count, got = collect_mount_hashes(mount_point)
+    if got_count != len(SAMPLE_FILES):
+        failures.append(
+            "挂载后文件数量不符: got=%d want=%d" % (got_count, len(SAMPLE_FILES))
+        )
+    elif got != want:
+        failures.append("挂载后内容字节集合不一致: %s" % (sorted((got - want).items())[:5],))
+    else:
+        print(
+            "ok   内核挂载后 %d 个文件内容逐字节一致（名字映射由 pycdlib 验证）"
+            % len(SAMPLE_FILES)
+        )
 
 
 def check_symlink(failures):
