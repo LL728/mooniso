@@ -119,3 +119,21 @@ test "builder can add a UEFI section entry" {
     None => assert_true(false)
   }
 }
+
+///|
+test "builder writes rock ridge symlinks" {
+  let builder = IsoBuilder::new()
+  builder.add_file("/hello.txt", bytes_of([b'h', b'i']))
+  builder.add_symlink("/link.txt", "/hello.txt")
+  let image = IsoImage::open(builder.build())
+  let entries = image.list_dir("/")
+  let mut found = false
+  for entry in entries {
+    if entry.name == "link.txt" {
+      found = true
+      assert_true(entry.is_symlink())
+      assert_eq(entry.symlink_target, Some("/hello.txt"))
+    }
+  }
+  assert_true(found)
+}

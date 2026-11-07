@@ -22,6 +22,8 @@ pub struct IsoBuilder {
   mut boot_platform : Int32
   dirs : Array[String]
   files : Array[(String, Bytes)]
+  /// 符号链接：路径 -> 目标
+  symlinks : Array[(String, String)]
 }
 
 ///|
@@ -36,6 +38,7 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     boot_platform: 0,
     dirs: ["/"],
     files: [],
+    symlinks: [],
   }
 }
 
@@ -318,7 +321,7 @@ fn make_dir_record(
 
 ///|
 /// Rock Ridge 的 NM + PX 条目。
-fn rr_susp(name : String, mode : Int32) -> Bytes {
+fn rr_susp(name : String, mode : Int32, symlink : String?) -> Bytes {
   let rr = Bytes::from_array([b'R', b'R', b'\x05', b'\x01', b'\x01'][:])
   // Rock Ridge 的 NM 按惯例是 UTF-8 字节，不能用 ASCII 截断
   let nm_bytes = @utf8.encode(name)
@@ -336,7 +339,41 @@ fn rr_susp(name : String, mode : Int32) -> Bytes {
     ),
     px_body,
   ])
-  concat_bytes([rr, nm, px])
+  let sl = match symlink {
+    Some(target) => sl_entry(target)
+    None => Bytes::new(0)
+  }
+  concat_bytes([rr, nm, px, sl])
+}
+
+///|
+/// Rock Ridge 的 SL 条目：把目标路径拆成 root 组件 + 各级名字。
+fn sl_entry(target : String) -> Bytes {
+  let parts : Array[Bytes] = []
+  let mut rest = target
+  if rest.has_prefix("/") {
+    // 绝对路径：第一个组件是 root（flags = 8，长度 0）
+    parts.push(Bytes::from_array([b'\x08', b'\x00'][:]))
+    rest = rest[1:].to_owned()
+  }
+  for segment in rest.split("/") {
+    let seg = segment.to_owned()
+    if seg == "" {
+      continue
+    }
+    let raw = @utf8.encode(seg)
+    parts.push(
+      concat_bytes([
+        Bytes::from_array([b'\x00', raw.length().to_byte()][:]),
+        raw,
+      ]),
+    )
+  }
+  let body = concat_bytes([Bytes::from_array([b'\x00'][:]), concat_bytes(parts)])
+  concat_bytes([
+    Bytes::from_array([b'S', b'L', (body.length() + 4).to_byte(), b'\x01'][:]),
+    body,
+  ])
 }
 
 ///|
@@ -414,6 +451,8 @@ priv struct OutFile {
   mut lba : Int32
   size : Int32
   data : Bytes
+  /// 符号链接目标；普通文件为 None
+  symlink : String?
 }
 
 ///|
@@ -454,6 +493,21 @@ pub fn IsoBuilder::add_directory(self : IsoBuilder, path : String) -> Unit {
     }
     self.dirs.push(normalized)
   }
+}
+
+///|
+/// 添加一个 Rock Ridge 符号链接（目标按原样写进 SL 条目）。
+pub fn IsoBuilder::add_symlink(
+  self : IsoBuilder,
+  path : String,
+  target : String,
+) -> Unit {
+  let normalized = normalize_path(path)
+  let parent = parent_of(normalized)
+  if index_of(self.dirs, parent) < 0 {
+    self.add_directory(parent)
+  }
+  self.symlinks.push((normalized, target))
 }
 
 ///|
@@ -519,6 +573,25 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       lba: 0,
       size: data.length(),
       data,
+      symlink: None,
+    })
+  }
+  // 符号链接在 ISO 树里也是一条"文件"记录，内容长度 0
+  for entry in self.symlinks {
+    let (path, target) = entry
+    let directory = index_of(paths, parent_of(path))
+    if directory < 0 {
+      raise BadDescriptor(0)
+    }
+    files.push(OutFile::{
+      path,
+      name: base_of(path),
+      iso_name: "",
+      dir: directory,
+      lba: 0,
+      size: 0,
+      data: Bytes::new(0),
+      symlink: Some(target),
     })
   }
   // 每个目录内部各自去重地分配 ISO 9660 level 1 名字
@@ -789,7 +862,7 @@ fn build_dir_records(
         ascii_bytes(dirs[index].iso_name)
       }
       let susp = if rr {
-        rr_susp(dirs[index].name, 0o040755)
+        rr_susp(dirs[index].name, 0o040755, None)
       } else {
         Bytes::new(0)
       }
@@ -802,9 +875,14 @@ fn build_dir_records(
       } else {
         ascii_bytes(files[index].iso_name)
       }
-      let flags = if files[index].size > 0 { 0 } else { 0 }
+      let flags = 0
+      let mode = if files[index].symlink is Some(_) {
+        0o120777
+      } else {
+        0o100644
+      }
       let susp = if rr {
-        rr_susp(files[index].name, 0o100644)
+        rr_susp(files[index].name, mode, files[index].symlink)
       } else {
         Bytes::new(0)
       }

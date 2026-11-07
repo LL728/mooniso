@@ -18,6 +18,7 @@
 
 - 从目录树生成映像：ISO 9660 level 1 名字（自动 8.3 化与去重）+ Joliet + Rock Ridge
 - 可生成 **El Torito 可启动映像**：BIOS 启动项 + UEFI section header（双启动），含校验和
+- Rock Ridge：NM（原名）、PX（POSIX 权限）、SL（符号链接）
 - 可分别关闭 Joliet / Rock Ridge；L、M 路径表按规范生成
 
 ## 演示
@@ -47,6 +48,7 @@ moon run cmd/main -- udf-ls  image.iso /Docs         # 走 UDF 视角列目录
 moon run cmd/main -- udf-cat image.iso /hello.txt    # 走 UDF 视角读文件
 moon run cmd/main -- create  out.iso ./some-dir      # 从目录生成映像
 moon run cmd/main -- create  out.iso ./some-dir --boot /boot.bin --efi /efi.img   # BIOS+UEFI 双启动
+moon run cmd/main -- create  out.iso ./some-dir --link /link.txt=/hello.txt       # 写入 RR 符号链接
 ```
 
 最小可运行示例：

@@ -110,6 +110,35 @@ def compare_mount(failures, mount_point, src_dir):
         print("ok   挂载后与源目录逐文件一致（%d 个文件）" % len(SAMPLE_FILES))
 
 
+def check_symlink(failures):
+    """写入侧：生成带 Rock Ridge 符号链接的映像，用 pycdlib 校验链接目标。"""
+    tmp = tempfile.mkdtemp(prefix="mooniso-link-")
+    try:
+        with open(os.path.join(tmp, "hello.txt"), "wb") as f:
+            f.write(b"hi\n")
+        image = os.path.join(tmp, "link.iso")
+        run_cli(["create", image, tmp, "--link", "/link.txt=/hello.txt"])
+        iso = pycdlib.PyCdlib()
+        iso.open(image)
+        try:
+            found = False
+            for child in iso.list_children(rr_path="/"):
+                rr = child.rock_ridge
+                name = rr.name() if rr else None
+                if name == "link.txt":
+                    found = True
+                    if not child.is_symlink():
+                        failures.append("link.txt 未被识别为符号链接")
+                    elif rr.symlink_path() != "/hello.txt":
+                        failures.append("link.txt 目标不符: %r" % rr.symlink_path())
+            if found and not failures:
+                print("ok   Rock Ridge 符号链接被试独立实现识别")
+        finally:
+            iso.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check_bootable(failures):
     """写入侧：生成可启动 ISO，用 pycdlib 校验 El Torito 启动项。"""
     tmp = tempfile.mkdtemp(prefix="mooniso-boot-")
@@ -189,6 +218,7 @@ def main():
     if args and args[0] == "--boot-only":
         failures = []
         check_bootable(failures)
+        check_symlink(failures)
         if failures:
             print("\n".join(failures))
             print("FAILED")

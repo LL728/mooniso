@@ -232,6 +232,7 @@ fn create_image(
   src_dir : String,
   boot_path : String?,
   efi_path : String?,
+  links : Array[String],
 ) -> Unit raise @mooniso.IsoError {
   let builder = @mooniso.IsoBuilder::new()
   builder.volume_id("MOONISO")
@@ -249,6 +250,20 @@ fn create_image(
       println("efi image: \{path}")
     }
     None => ()
+  }
+  for link in links {
+    // 形式：/path=target
+    let mut at = -1
+    let chars = link.to_array()
+    for i = 0; i < chars.length(); i = i + 1 {
+      if chars[i].to_int() == 61 {
+        at = i
+        break
+      }
+    }
+    if at > 0 {
+      builder.add_symlink(link[:at].to_owned(), link[at + 1:].to_owned())
+    }
   }
   fs_write_bytes(out_path, builder.build())
   println("created \{out_path} from \{src_dir}")
@@ -275,6 +290,7 @@ fn main {
       }
       let mut boot : String? = None
       let mut efi : String? = None
+      let links : Array[String] = []
       for i = base + 3; i + 1 < args.length(); i = i + 1 {
         if args[i] == "--boot" {
           boot = Some(args[i + 1])
@@ -282,8 +298,11 @@ fn main {
         if args[i] == "--efi" {
           efi = Some(args[i + 1])
         }
+        if args[i] == "--link" {
+          links.push(args[i + 1])
+        }
       }
-      create_image(args[base + 1], args[base + 2], boot, efi)
+      create_image(args[base + 1], args[base + 2], boot, efi, links)
       return
     }
     if command != "info" &&
