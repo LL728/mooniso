@@ -251,6 +251,7 @@ def main():
         if not failures:
             print("ok   pycdlib 读回的目录树一致（%d 个条目）" % len(want))
         check_bootable(failures)
+        check_symlink(failures)
         if mount_point:
             compare_mount(failures, mount_point, src)
         # 生成物留在 %TEMP%，方便 --mount-point 调用方挂载前使用
