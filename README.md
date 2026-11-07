@@ -36,6 +36,9 @@ moon add LL728/mooniso
 
 ## 命令行
 
+> 下列命令针对**本仓库源码**，请在仓库根目录执行（`cmd/main` 是相对的）。
+> 作为依赖使用时请用上面的 `moon add`，按「库 API」一节调用。
+
 ```bash
 moon run cmd/main -- info    image.iso               # 卷信息 + 启动信息
 moon run cmd/main -- ls      image.iso /SUB          # 列目录
@@ -76,6 +79,20 @@ builder.add_file("/Hello.txt", b"hi")
 let image_bytes = builder.build()
 ```
 
+## 设计说明
+
+- **分层**：`byte_reader`（both-endian 数值）→ `volume`（卷描述符 / El Torito）→ `dir_record` + `susp`（目录记录 / Rock Ridge）→ `image`（树遍历、文件读取、校验）→ `writer`（布局与写出）→ `udf`（独立于 ISO 9660 的 UDF 路径）。
+- **错误模型**：所有解析入口返回 `IsoError`，区分「结构损坏」（`Truncated` / `BadBothEndian` / `BadSignature` / `BadDescriptor` / `BadDirectoryRecord`）与「语义问题」（`NotFound` / `NotDirectory` / `IsDirectory` / `IsSymlink`），调用方不必猜。
+- **写入侧**：先把目录树摊平成表 → 分配逻辑块（描述符 / 路径表 / ISO 目录 / Joliet 目录 / 文件 / 启动目录）→ 再回填记录。目录记录按名字升序，符合 ECMA-119 对顺序的要求。
+- **手写实现**：核心解析与生成逻辑全部手写自规范；Python 脚本只用于生成测试映像与对拍，不参与库的构建。
+
+## 参考与来源
+
+- 规范：ECMA-119（ISO 9660）、ECMA-167 / ISO 13346（UDF）、El Torito Bootable CD-ROM Format Specification 1.0、IEEE P1282（Rock Ridge / SUSP）。
+- 对拍基线（**仅测试期使用，不随包分发、未移植任何代码**）：pycdlib（Python，LGPL-2.1）、libarchive（BSD-2-Clause）、Windows CDFS 驱动、Linux 内核 iso9660 驱动。
+- 测试映像：`tools/gen_fixtures.py` 按规范自行构造；Joliet / Rock Ridge / El Torito / UDF 映像由 `tools/gen_fixtures_pycdlib.py`、`tools/gen_fixtures_udf.py` 调用 pycdlib 生成，作为**独立实现**的基准。
+- 本项目采用 Apache-2.0，与上述规范及参考实现的许可证无冲突。
+
 ## 测试与对拍
 
 ```bash
@@ -94,9 +111,10 @@ python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib
 
 ## 已知边界
 
-- 只支持 ISO 9660 level 1 名字映射（写入侧）；Rock Ridge 版本为 1.09
-- UDF 只读：不支持 VAT（多区段写入）、元数据分区与 >4 GiB 的单个文件
-- 写入侧不生成 UDF；El Torito 只写单个 UEFI section（多 section / 启动信息表未写）
+- 写入侧名字级别可选：level 1（8.3 + `;1`，默认）/ level 2（≤31 字符）/ level 3（≤207 字符），`--level` 切换
+- Rock Ridge 写入可选 1.09 / 1.12（`--rr 112`，PX 带序列号、ER 用 IEEE_P1282）；读取兼容两者的常见子集
+- UDF 为只读，覆盖 UDF 2.01–2.60 的常规单区段映像（多区段 VAT、元数据分区、>4 GiB 单文件不在范围内）
+- 写入侧不生成 UDF；El Torito 支持 BIOS 启动项 + 单个 UEFI section（多 section 与启动信息表不在范围内）
 
 ## 许可证
 

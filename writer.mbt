@@ -20,6 +20,10 @@ pub struct IsoBuilder {
   /// 启动映像需要加载的扇区数（写进启动目录）
   mut boot_load_sectors : Int32
   mut boot_platform : Int32
+  /// ISO 9660 名字级别：1（8.3）/ 2（≤31 字符）/ 3（≤207 字符）
+  mut name_level : Int32
+  /// Rock Ridge 版本：109 或 112
+  mut rr_version : Int32
   dirs : Array[String]
   files : Array[(String, Bytes)]
   /// 符号链接：路径 -> 目标
@@ -36,10 +40,24 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     efi_path: None,
     boot_load_sectors: 4,
     boot_platform: 0,
+    name_level: 1,
+    rr_version: 109,
     dirs: ["/"],
     files: [],
     symlinks: [],
   }
+}
+
+///|
+/// 设置 ISO 9660 名字级别（1/2/3），影响写入的 ISO 树名字，不影响 Joliet / Rock Ridge 原名。
+pub fn IsoBuilder::name_level(self : IsoBuilder, level : Int32) -> Unit {
+  self.name_level = level
+}
+
+///|
+/// 设置 Rock Ridge 版本（109 或 112）：1.12 的 PX 记录多 8 字节序列号。
+pub fn IsoBuilder::rr_version(self : IsoBuilder, version : Int32) -> Unit {
+  self.rr_version = version
 }
 
 ///|
@@ -140,60 +158,85 @@ fn base_of(path : String) -> String {
 
 ///|
 /// 把名字转成 ISO 9660 level 1 的 8.3 形式（目录不带扩展名与版本号）。
-fn iso_level1(name : String, is_dir : Bool, used : Array[String]) -> String {
+fn iso_name(
+  name : String,
+  is_dir : Bool,
+  used : Array[String],
+  level : Int32,
+) -> String {
+  // 先按 d-characters 规整：大写字母、数字、下划线，点号单独处理
   let mut base = ""
-  let mut ext = ""
-  let mut in_ext = false
+  let mut dots = 0
   for c in name.to_array() {
     let code = c.to_int()
-    let mapped = if code >= 97 && code <= 122 {
-      Int32::unsafe_to_char(code - 32)
+    if code >= 97 && code <= 122 {
+      base = base + Int32::unsafe_to_char(code - 32).to_string()
     } else if (code >= 65 && code <= 90) ||
       (code >= 48 && code <= 57) ||
       code == 95 {
-      c
-    } else if code == 46 && !is_dir {
-      in_ext = true
-      continue
+      base = base + c.to_string()
+    } else if code == 46 {
+      dots = dots + 1
+      if level >= 3 {
+        base = base + "."
+      } else if dots == 1 && !is_dir {
+        base = base + "."
+      } else {
+        base = base + "_"
+      }
     } else {
-      Int32::unsafe_to_char(95) // 其它字符统一成下划线
-    }
-    if in_ext {
-      ext = ext + mapped.to_string()
-    } else {
-      base = base + mapped.to_string()
+      base = base + "_"
     }
   }
-  let mut trimmed_base = if base.length() > 8 {
-    base[:8].to_owned()
+  if base == "" {
+    base = if is_dir { "DIR" } else { "FILE" }
+  }
+  // 按级别截断
+  let mut candidate = if level == 1 {
+    // 8.3：最后一个点之后算扩展名
+    let mut stem = base
+    let mut suffix = ""
+    match base.rev_find(".") {
+      Some(at) if at > 0 && !is_dir => {
+        stem = base[:at].to_owned()
+        suffix = base[at + 1:].to_owned()
+      }
+      _ => ()
+    }
+    let stem_t = if stem.length() > 8 { stem[:8].to_owned() } else { stem }
+    let suffix_t = if suffix.length() > 3 {
+      suffix[:3].to_owned()
+    } else {
+      suffix
+    }
+    if suffix_t == "" {
+      stem_t
+    } else {
+      stem_t + "." + suffix_t
+    }
+  } else if level == 2 {
+    if base.length() > 31 {
+      base[:31].to_owned()
+    } else {
+      base
+    }
+  } else if base.length() > 207 {
+    base[:207].to_owned()
   } else {
     base
   }
-  let trimmed_ext = if ext.length() > 3 { ext[:3].to_owned() } else { ext }
-  if trimmed_base == "" {
-    trimmed_base = if is_dir { "DIR" } else { "FILE" }
-  }
-  let mut candidate = if is_dir || trimmed_ext == "" {
-    trimmed_base
-  } else {
-    trimmed_base + "." + trimmed_ext
-  }
-  // 同目录内去重：ISO 9660 要求名字唯一
-  let mut suffix = 0
+  // 同目录去重
+  let mut suffix_index = 0
   while used.contains(candidate) {
-    suffix = suffix + 1
-    let tag = suffix.to_string()
-    let keep = if trimmed_base.length() + tag.length() > 8 {
-      8 - tag.length()
+    suffix_index = suffix_index + 1
+    let tag = suffix_index.to_string()
+    let limit = if level == 1 { 8 - tag.length() } else { 31 - tag.length() }
+    let keep = if candidate.length() > limit {
+      limit
     } else {
-      trimmed_base.length()
+      candidate.length()
     }
-    let stem = trimmed_base[:keep].to_owned() + tag
-    candidate = if is_dir || trimmed_ext == "" {
-      stem
-    } else {
-      stem + "." + trimmed_ext
-    }
+    candidate = candidate[:keep].to_owned() + tag
   }
   used.push(candidate)
   if is_dir {
@@ -321,7 +364,12 @@ fn make_dir_record(
 
 ///|
 /// Rock Ridge 的 NM + PX 条目。
-fn rr_susp(name : String, mode : Int32, symlink : String?) -> Bytes {
+fn rr_susp(
+  name : String,
+  mode : Int32,
+  symlink : String?,
+  rr_version : Int32,
+) -> Bytes {
   let rr = Bytes::from_array([b'R', b'R', b'\x05', b'\x01', b'\x01'][:])
   // Rock Ridge 的 NM 按惯例是 UTF-8 字节，不能用 ASCII 截断
   let nm_bytes = @utf8.encode(name)
@@ -331,19 +379,33 @@ fn rr_susp(name : String, mode : Int32, symlink : String?) -> Bytes {
     ),
     nm_bytes,
   ])
-  // PX 用 4 个字段（mode/nlink/uid/gid）共 32 字节 = RR 1.09 的形态
-  let px_body = concat_bytes([both32(mode), both32(1), both32(0), both32(0)])
+  // 1.09 的 PX 是 4 个字段（32 字节），1.12 多一个 8 字节序列号
+  let px_body = if rr_version >= 112 {
+    concat_bytes([both32(mode), both32(1), both32(0), both32(0), both32(0)])
+  } else {
+    concat_bytes([both32(mode), both32(1), both32(0), both32(0)])
+  }
   let px = concat_bytes([
     Bytes::from_array(
       [b'P', b'X', (px_body.length() + 4).to_byte(), b'\x01'][:],
     ),
     px_body,
   ])
+  // TF：只写修改时间（短格式 7 字节），与 ISO 记录里的日期一致
+  let tf_body = Bytes::from_array(
+    [b'\x02', b'\x7E', b'\x01', b'\x02', b'\x03', b'\x04', b'\x05', b'\x00'][:],
+  )
+  let tf = concat_bytes([
+    Bytes::from_array(
+      [b'T', b'F', (tf_body.length() + 4).to_byte(), b'\x01'][:],
+    ),
+    tf_body,
+  ])
   let sl = match symlink {
     Some(target) => sl_entry(target)
     None => Bytes::new(0)
   }
-  concat_bytes([rr, nm, px, sl])
+  concat_bytes([rr, nm, px, tf, sl])
 }
 
 ///|
@@ -378,11 +440,12 @@ fn sl_entry(target : String) -> Bytes {
 
 ///|
 /// 根目录「.」记录里的 SP + ER，声明本映像带 Rock Ridge。
-fn rr_sp_er() -> Bytes {
+fn rr_sp_er(rr_version : Int32) -> Bytes {
   let sp = Bytes::from_array(
     [b'S', b'P', b'\x07', b'\x01', b'\xBE', b'\xEF', b'\x00'][:],
   )
-  let id = ascii_bytes("RRIP_1991A")
+  let ext_id = if rr_version >= 112 { "IEEE_P1282" } else { "RRIP_1991A" }
+  let id = ascii_bytes(ext_id)
   let desc = ascii_bytes("THE ROCK RIDGE INTERCHANGE PROTOCOL")
   // ER：4 个长度/版本字节 + 扩展名 + 描述 + 来源
   let body = concat_bytes([
@@ -599,18 +662,31 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
     let used : Array[String] = []
     for i = 0; i < dirs.length(); i = i + 1 {
       if dirs[i].parent == d {
-        dirs[i].iso_name = iso_level1(dirs[i].name, true, used)
+        dirs[i].iso_name = iso_name(dirs[i].name, true, used, self.name_level)
       }
     }
     for i = 0; i < files.length(); i = i + 1 {
       if files[i].dir == d {
-        files[i].iso_name = iso_level1(files[i].name, false, used)
+        files[i].iso_name = iso_name(
+          files[i].name,
+          false,
+          used,
+          self.name_level,
+        )
       }
     }
   }
   // 先按占位 extent 生成一遍，得到每个目录数据块的大小
   for d = 0; d < dirs.length(); d = d + 1 {
-    let records = build_dir_records(d, dirs, files, false, false, [])
+    let records = build_dir_records(
+      d,
+      dirs,
+      files,
+      false,
+      false,
+      [],
+      self.rr_version,
+    )
     dirs[d].data = pack_records(records, sector)
     dirs[d].size = dirs[d].data.length()
   }
@@ -653,7 +729,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   let joliet_dirs : Array[OutDir] = []
   if self.joliet {
     for d = 0; d < dirs.length(); d = d + 1 {
-      let records = build_dir_records(d, dirs, files, true, false, [])
+      let records = build_dir_records(d, dirs, files, true, false, [], 109)
       let data = pack_records(records, sector)
       joliet_dirs.push(OutDir::{
         name: dirs[d].name,
@@ -679,14 +755,22 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   // 用真实 extent 重新生成目录数据
   for d = 0; d < dirs.length(); d = d + 1 {
     dirs[d].data = pack_records(
-      build_dir_records(d, dirs, files, false, self.rock_ridge, []),
+      build_dir_records(
+        d,
+        dirs,
+        files,
+        false,
+        self.rock_ridge,
+        [],
+        self.rr_version,
+      ),
       sector,
     )
   }
   if self.joliet {
     for d = 0; d < joliet_dirs.length(); d = d + 1 {
       joliet_dirs[d].data = pack_records(
-        build_dir_records(d, dirs, files, true, false, joliet_dirs),
+        build_dir_records(d, dirs, files, true, false, joliet_dirs, 109),
         sector,
       )
     }
@@ -783,6 +867,7 @@ fn build_dir_records(
   joliet_tree : Bool,
   rr : Bool,
   joliet_dirs : Array[OutDir],
+  rr_version : Int32,
 ) -> Array[Bytes] {
   let extent_of = fn(index : Int32) -> Int32 {
     if joliet_tree && index < joliet_dirs.length() {
@@ -804,7 +889,11 @@ fn build_dir_records(
   let parent_index = if parent < 0 { d } else { parent }
   let records : Array[Bytes] = []
   // "."（根目录额外带 SP + ER）
-  let self_susp = if rr && d == 0 { rr_sp_er() } else { Bytes::new(0) }
+  let self_susp = if rr && d == 0 {
+    rr_sp_er(rr_version)
+  } else {
+    Bytes::new(0)
+  }
   records.push(
     make_dir_record(
       self_extent,
@@ -862,7 +951,7 @@ fn build_dir_records(
         ascii_bytes(dirs[index].iso_name)
       }
       let susp = if rr {
-        rr_susp(dirs[index].name, 0o040755, None)
+        rr_susp(dirs[index].name, 0o040755, None, rr_version)
       } else {
         Bytes::new(0)
       }
@@ -882,7 +971,7 @@ fn build_dir_records(
         0o100644
       }
       let susp = if rr {
-        rr_susp(files[index].name, mode, files[index].symlink)
+        rr_susp(files[index].name, mode, files[index].symlink, rr_version)
       } else {
         Bytes::new(0)
       }
@@ -996,6 +1085,7 @@ fn descriptor_base(
   root : OutDir,
   rr : Bool,
   joliet : Bool,
+  rr_version : Int32,
 ) -> Bytes {
   let sector = FixedArray::make(SECTOR_SIZE, b'\x00')
   sector[0] = kind.to_byte()
@@ -1057,7 +1147,7 @@ fn descriptor_base(
     2,
     Bytes::from_array([b'\x00'][:]),
     if rr {
-      rr_sp_er()
+      rr_sp_er(rr_version)
     } else {
       Bytes::new(0)
     },
@@ -1110,6 +1200,7 @@ fn make_pvd(
     root,
     builder.rock_ridge,
     false,
+    builder.rr_version,
   )
 }
 
@@ -1131,6 +1222,7 @@ fn make_svd(
     root,
     false,
     true,
+    109,
   )
 }
 

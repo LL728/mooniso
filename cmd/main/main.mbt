@@ -233,9 +233,13 @@ fn create_image(
   boot_path : String?,
   efi_path : String?,
   links : Array[String],
+  name_level : Int32,
+  rr_version : Int32,
 ) -> Unit raise @mooniso.IsoError {
   let builder = @mooniso.IsoBuilder::new()
   builder.volume_id("MOONISO")
+  builder.name_level(name_level)
+  builder.rr_version(rr_version)
   pack_dir(builder, src_dir, "/")
   match boot_path {
     Some(path) => {
@@ -270,8 +274,10 @@ fn create_image(
 }
 
 ///|
-fn main {
-  let args = @env.args()
+
+///|
+/// 返回进程退出码：0 成功，1 运行/结构错误，2 用法错误。
+fn run_cli(args : Array[String]) -> Int32 {
   // 各后端 argv 形状不同：wasm-gc/native 是 [程序, ...]，js 是 [node, 脚本.js, ...]
   let mut base = 1
   if base < args.length() && args[base].has_suffix(".js") {
@@ -279,17 +285,19 @@ fn main {
   }
   if base + 1 >= args.length() {
     usage()
-    return
+    return 2
   }
   let command = args[base]
   try {
     if command == "create" {
       if base + 2 >= args.length() {
         usage()
-        return
+        return 2
       }
       let mut boot : String? = None
       let mut efi : String? = None
+      let mut name_level = 1
+      let mut rr_version = 109
       let links : Array[String] = []
       for i = base + 3; i + 1 < args.length(); i = i + 1 {
         if args[i] == "--boot" {
@@ -301,9 +309,32 @@ fn main {
         if args[i] == "--link" {
           links.push(args[i + 1])
         }
+        if args[i] == "--level" {
+          let parsed = Some(@string.parse_int(args[i + 1])) catch { _ => None }
+          match parsed {
+            Some(level) if level >= 1 && level <= 3 => name_level = level
+            _ => ()
+          }
+        }
+        if args[i] == "--rr" {
+          let parsed = Some(@string.parse_int(args[i + 1])) catch { _ => None }
+          match parsed {
+            Some(version) if version == 109 || version == 112 =>
+              rr_version = version
+            _ => ()
+          }
+        }
       }
-      create_image(args[base + 1], args[base + 2], boot, efi, links)
-      return
+      create_image(
+        args[base + 1],
+        args[base + 2],
+        boot,
+        efi,
+        links,
+        name_level,
+        rr_version,
+      )
+      return 0
     }
     if command != "info" &&
       command != "ls" &&
@@ -315,7 +346,7 @@ fn main {
       command != "udf-ls" &&
       command != "udf-cat" {
       usage()
-      return
+      return 2
     }
     let path = if base + 2 < args.length() { args[base + 2] } else { "/" }
     let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes(args[base + 1]))
@@ -336,7 +367,7 @@ fn main {
     } else if command == "extract-all" {
       if base + 2 >= args.length() {
         usage()
-        return
+        return 2
       }
       extract_all(image, "/", args[base + 2])
     } else if command == "ls" {
@@ -347,30 +378,70 @@ fn main {
       // extract 需要第三个参数：输出路径
       if base + 3 >= args.length() {
         usage()
-        return
+        return 2
       }
       @fs.write_bytes_to_file(args[base + 3], image.read_file(path))
       println(
         "extracted \{path} -> \{args[base + 3]} (\{image.file_size(path)} bytes)",
       )
     }
+    return 0
   } catch {
-    @mooniso.IsoError::Truncated => println("ERROR\ttruncated image")
-    @mooniso.IsoError::BadBothEndian =>
+    @mooniso.IsoError::Truncated => {
+      println("ERROR\ttruncated image")
+      return 1
+    }
+    @mooniso.IsoError::BadBothEndian => {
       println("ERROR\tboth-endian fields disagree")
-    @mooniso.IsoError::BadSignature =>
+      return 1
+    }
+    @mooniso.IsoError::BadSignature => {
       println("ERROR\tnot an ISO 9660 image (missing CD001)")
-    @mooniso.IsoError::BadDescriptor(code) =>
+      return 1
+    }
+    @mooniso.IsoError::BadDescriptor(code) => {
       println("ERROR\tbad volume descriptor (\{code})")
-    @mooniso.IsoError::NotFound(p) => println("ERROR\tno such path: \{p}")
-    @mooniso.IsoError::NotDirectory(p) =>
+      return 1
+    }
+    @mooniso.IsoError::NotFound(p) => {
+      println("ERROR\tno such path: \{p}")
+      return 1
+    }
+    @mooniso.IsoError::NotDirectory(p) => {
       println("ERROR\tnot a directory: \{p}")
-    @mooniso.IsoError::IsDirectory(p) => println("ERROR\tis a directory: \{p}")
-    @mooniso.IsoError::IsSymlink(p) => println("ERROR\tis a symlink: \{p}")
-    @mooniso.IsoError::HostIoError(msg) => println("ERROR\tI/O: \{msg}")
-    @mooniso.IsoError::BadDirectoryRecord(len) =>
+      return 1
+    }
+    @mooniso.IsoError::IsDirectory(p) => {
+      println("ERROR\tis a directory: \{p}")
+      return 1
+    }
+    @mooniso.IsoError::IsSymlink(p) => {
+      println("ERROR\tis a symlink: \{p}")
+      return 1
+    }
+    @mooniso.IsoError::HostIoError(msg) => {
+      println("ERROR\tI/O: \{msg}")
+      return 1
+    }
+    @mooniso.IsoError::BadDirectoryRecord(len) => {
       println("ERROR\tbad directory record (\{len} bytes)")
-    @fs.IOError::IOError(msg) => println("ERROR\tI/O: \{msg}")
-    _ => println("ERROR\tunexpected failure")
+      return 1
+    }
+    @fs.IOError::IOError(msg) => {
+      println("ERROR\tI/O: \{msg}")
+      return 1
+    }
+    _ => {
+      println("ERROR\tunexpected failure")
+      return 1
+    }
+  }
+}
+
+///|
+fn main {
+  let code = run_cli(@env.args())
+  if code != 0 {
+    @sys.exit(code)
   }
 }

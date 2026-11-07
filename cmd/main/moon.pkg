@@ -2,7 +2,9 @@ import {
   "LL728/mooniso",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
+  "moonbitlang/core/string",
   "moonbitlang/x/fs",
+  "moonbitlang/x/sys",
 }
 
 pkgtype(kind: "executable")

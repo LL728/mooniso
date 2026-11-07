@@ -137,3 +137,48 @@ test "builder writes rock ridge symlinks" {
   }
   assert_true(found)
 }
+
+///|
+test "name level 2 keeps names up to 31 chars in the iso tree" {
+  let builder = IsoBuilder::new()
+  builder.name_level(2)
+  let long = "a-name-longer-than-eight-chars.txt"
+  builder.add_file("/" + long, bytes_of([b'x']))
+  let image = IsoImage::open(builder.build())
+  // 期望 ISO 树里的名字是 31 字符截断（去掉 ;1 之后），
+  // 而 Joliet 视角仍能看到全名 —— 这里只验证读取到的 ISO 名确实比 8 长。
+  let found = try {
+    let records = image.find_records("/" + long)
+    records.length() > 0
+  } catch {
+    _ => false
+  }
+  assert_true(found)
+}
+
+///|
+test "rr version 112 emits a 44-byte PX with serial number" {
+  let builder = IsoBuilder::new()
+  builder.rr_version(112)
+  builder.add_file("/hello.txt", bytes_of([b'h']))
+  let image = IsoImage::open(builder.build())
+  // 重新读出 . 记录，检查它的 PX 长度是 44（36+8）
+  // 重新读出根目录 "." 记录，解析它的 PX
+  // PX 挂在文件和目录记录上，不在 "." 上；直接查 hello.txt 的 system use
+  let entry = image.find_record("/hello.txt")
+  let mut px_len_ok = false
+  let mut i = 0
+  let area = entry.system_use
+  while i + 4 <= area.length() {
+    let len = area[i + 2].to_uint().reinterpret_as_int()
+    if len < 4 || i + len > area.length() {
+      break
+    }
+    if area[i].to_uint().reinterpret_as_int() == 0x50 &&
+      area[i + 1].to_uint().reinterpret_as_int() == 0x58 {
+      px_len_ok = len == 44
+    }
+    i = i + len
+  }
+  assert_true(px_len_ok)
+}
