@@ -18,9 +18,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPECTED = os.path.join(ROOT, "tools", "expected")
 
 # (映像, pycdlib 基准清单)
+# (映像, 基准清单, 列目录用的 CLI 子命令)
 CASES = [
-    ("joliet.iso", "joliet_manifest.json"),
-    ("rockridge.iso", "rockridge_manifest.json"),
+    ("joliet.iso", "joliet_manifest.json", "ls"),
+    ("rockridge.iso", "rockridge_manifest.json", "ls"),
+    ("udf.iso", "udf_manifest.json", "udf-ls"),
 ]
 
 # El Torito 启动项基准（由 pycdlib 导出）
@@ -38,9 +40,9 @@ def run_cli(args):
     return proc.stdout
 
 
-def cli_entries(image, directory):
+def cli_entries(image, directory, command="ls"):
     out = []
-    for line in run_cli(["ls", image, directory]).splitlines():
+    for line in run_cli([command, image, directory]).splitlines():
         if not line:
             continue
         fields = line.split("\t")
@@ -84,18 +86,22 @@ def check_boot(failures):
 def main():
     failures = []
     checked = 0
-    for image, manifest_name in CASES:
+    for image, manifest_name, command in CASES:
         image_path = "tools/corpus/" + image
         with open(os.path.join(EXPECTED, manifest_name), encoding="utf-8") as f:
             tree = json.load(f)
         for directory, want in sorted(tree.items()):
             path = "/" if directory == "/" else directory
-            got = cli_entries(image_path, path)
+            got = cli_entries(image_path, path, command)
             want_sorted = sorted(want, key=lambda e: e["name"])
-            if got != want_sorted:
+            # 只比较基准清单里出现的字段（UDF 清单没有符号链接字段）
+            keys = sorted(want_sorted[0]) if want_sorted else []
+            got_view = [tuple(e.get(k) for k in keys) for e in got]
+            want_view = [tuple(e.get(k) for k in keys) for e in want_sorted]
+            if got_view != want_view:
                 failures.append(
                     "%s %s 与 pycdlib 不一致:\n  cli     = %s\n  pycdlib = %s"
-                    % (image, path, got, want_sorted)
+                    % (image, path, got_view, want_view)
                 )
             else:
                 checked += 1

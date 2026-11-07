@@ -154,6 +154,17 @@ fn pack_dir(
 }
 
 ///|
+fn print_udf_listing(
+  image : @mooniso.UdfImage,
+  path : String,
+) -> Unit raise @mooniso.IsoError {
+  for entry in image.list_dir(path) {
+    let kind = if entry.is_dir { "dir" } else { "file" }
+    println("\{entry.name}\t\{kind}\t\{entry.size}")
+  }
+}
+
+///|
 fn print_tree(
   image : @mooniso.IsoImage,
   path : String,
@@ -263,13 +274,23 @@ fn main {
       command != "extract" &&
       command != "tree" &&
       command != "extract-all" &&
-      command != "verify" {
+      command != "verify" &&
+      command != "udf-ls" &&
+      command != "udf-cat" {
       usage()
       return
     }
     let path = if base + 2 < args.length() { args[base + 2] } else { "/" }
     let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes(args[base + 1]))
-    if command == "info" {
+    if command == "udf-ls" {
+      print_udf_listing(
+        @mooniso.UdfImage::open(@fs.read_file_to_bytes(args[base + 1])),
+        path,
+      )
+    } else if command == "udf-cat" {
+      let udf = @mooniso.UdfImage::open(@fs.read_file_to_bytes(args[base + 1]))
+      println(@utf8.decode_lossy(udf.read_file(path)))
+    } else if command == "info" {
       print_info(image)
     } else if command == "tree" {
       print_tree(image, path)

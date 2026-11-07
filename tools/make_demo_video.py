@@ -159,6 +159,14 @@ def capture_demo():
                ("\n=> 一致" if original == extracted else "\n=> 不一致"),
     })
 
+    udf_fixture = os.path.join(ROOT, "tools", "corpus", "udf.iso")
+    if os.path.isfile(udf_fixture):
+        scenes.append({
+            "title": "同一张映像的另一面：UDF（ECMA-167）读取",
+            "cmd": "moon run cmd/main -- udf-ls tools/corpus/udf.iso /Docs",
+            "out": run(cli + ["udf-ls", udf_fixture, "/Docs"])[0].replace("\t", "   "),
+        })
+
     ps = (
         "$img = '%s'; Mount-DiskImage -ImagePath $img | Out-Null; Start-Sleep 3; "
         "$v = Get-DiskImage -ImagePath $img | Get-Volume; "

@@ -55,7 +55,9 @@ jobs:
         run: python3 -m pip install --quiet pycdlib
 
       - name: 生成 pycdlib 测试映像并导出基准清单
-        run: python3 tools/gen_fixtures_pycdlib.py
+        run: |
+          python3 tools/gen_fixtures_pycdlib.py
+          python3 tools/gen_fixtures_udf.py
 
       - name: 读取侧对拍（Joliet / Rock Ridge / El Torito）
         run: python3 tools/check_compat.py

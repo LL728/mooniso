@@ -1,0 +1,26 @@
+{
+  "/": [
+    {
+      "is_dir": true,
+      "name": "Docs",
+      "size": 140
+    },
+    {
+      "is_dir": false,
+      "name": "hello.txt",
+      "size": 10
+    }
+  ],
+  "/Docs": [
+    {
+      "is_dir": false,
+      "name": "note.md",
+      "size": 11
+    },
+    {
+      "is_dir": false,
+      "name": "说明.txt",
+      "size": 11
+    }
+  ]
+}

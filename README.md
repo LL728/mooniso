@@ -12,6 +12,7 @@
 - 文件内容读取（跨扇区、多段文件、0 字节文件、越界拒绝）
 - Joliet（UCS-2，含代理对）与 Rock Ridge（NM / PX / SL / CE 续接区）
 - El Torito 启动目录（启动标志、平台、媒体类型、加载地址）
+- **UDF（ECMA-167）读取**：Anchor、描述符序列、File Set、File Entry、FID（含 UTF-16 名字）
 
 写入：
 
@@ -42,6 +43,8 @@ moon run cmd/main -- extract image.iso /BIG.BIN out  # 落盘（二进制安全�
 moon run cmd/main -- tree    image.iso               # 递归列出整棵树
 moon run cmd/main -- extract-all image.iso ./out     # 整树导出（跳过符号链接）
 moon run cmd/main -- verify  image.iso               # 结构体检
+moon run cmd/main -- udf-ls  image.iso /Docs         # 走 UDF 视角列目录
+moon run cmd/main -- udf-cat image.iso /hello.txt    # 走 UDF 视角读文件
 moon run cmd/main -- create  out.iso ./some-dir      # 从目录生成映像
 moon run cmd/main -- create  out.iso ./some-dir --boot /boot.bin   # 生成可启动映像
 ```
@@ -79,6 +82,7 @@ python tools/gen_fixtures.py            # 生成 tools/corpus/*.iso（自身格�
 python tools/check_e2e.py               # CLI 输出与期望逐行比对
 
 python tools/gen_fixtures_pycdlib.py    # 用 pycdlib 生成 Joliet/Rock Ridge/El Torito 映像与基准清单
+python tools/gen_fixtures_udf.py        # 用 pycdlib 生成 UDF 2.60 映像与基准清单
 python tools/check_compat.py            # 读取侧与 pycdlib 对拍
 python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib 读回比对（含可启动映像）
 ```
@@ -89,8 +93,8 @@ python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib
 ## 已知边界
 
 - 只支持 ISO 9660 level 1 名字映射（写入侧）；Rock Ridge 版本为 1.09
-- 不写 UDF、不写 El Torito 启动项（读取支持）
-- 目录数据超过 4 GiB、且无 Joliet/Rock Ridge 的极端映像未做专门优化
+- UDF 只读：不支持 VAT（多区段写入）、元数据分区与 >4 GiB 的单个文件
+- 写入侧不生成 UDF；可生成 El Torito 启动项（无仿真，UEFI 启动项未写）
 
 ## 许可证
 
