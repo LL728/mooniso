@@ -121,19 +121,16 @@ def check_symlink(failures):
         iso = pycdlib.PyCdlib()
         iso.open(image)
         try:
-            found = False
-            for child in iso.list_children(rr_path="/"):
-                rr = child.rock_ridge
-                name = rr.name() if rr else None
-                if isinstance(name, bytes):
-                    name = name.decode("utf-8", "replace")
-                if name == "link.txt":
-                    found = True
-                    if not child.is_symlink():
-                        failures.append("link.txt 未被识别为符号链接")
-                    elif rr.symlink_path() != "/hello.txt":
-                        failures.append("link.txt 目标不符: %r" % rr.symlink_path())
-            if found and not failures:
+            links = [
+                (child, child.rock_ridge.symlink_path())
+                for child in iso.list_children(rr_path="/")
+                if child.is_symlink()
+            ]
+            if len(links) != 1:
+                failures.append("符号链接数量不符: %d" % len(links))
+            elif links[0][1] != "/hello.txt":
+                failures.append("符号链接目标不符: %r" % (links[0][1],))
+            else:
                 print("ok   Rock Ridge 符号链接被试独立实现识别")
         finally:
             iso.close()
