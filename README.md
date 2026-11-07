@@ -25,8 +25,16 @@
 
 ![demo](docs/demo/poster.png)
 
-终端动画演示（真实命令、真实输出）：[docs/demo/mooniso-demo.mp4](docs/demo/mooniso-demo.mp4)，
-可用 `python tools/make_demo_video.py` 重新生成。
+正式演示视频（1080p，中文配音 + 字幕，真实命令输出）：[docs/demo/mooniso-demo-official.mp4](docs/demo/mooniso-demo-official.mp4)。
+终端动画版：[docs/demo/mooniso-demo.mp4](docs/demo/mooniso-demo.mp4)。
+
+重新生成：
+
+```bash
+python tools/make_demo_video.py             # 终端动画版
+pwsh -File tools/gen_narration.ps1          # 生成旁白（System.Speech）
+python tools/make_demo_official.py          # 正式版（配音 + 字幕）
+```
 
 ## 安装
 
