@@ -1,0 +1,7 @@
+directories=2
+files=2
+symlinks=0
+bytes=28
+joliet=false
+rock_ridge=false
+OK

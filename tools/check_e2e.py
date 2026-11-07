@@ -27,6 +27,8 @@ CASES = [
     ("ls-sub", ["ls", "tools/corpus/minimal.iso", "/SUB"], "ls_sub.txt"),
     ("info-files", ["info", "tools/corpus/files.iso"], "info_files.txt"),
     ("ls-files", ["ls", "tools/corpus/files.iso"], "ls_files.txt"),
+    ("tree-minimal", ["tree", "tools/corpus/minimal.iso"], "tree_minimal.txt"),
+    ("verify-minimal", ["verify", "tools/corpus/minimal.iso"], "verify_minimal.txt"),
 ]
 
 MOUNT_CASES = {

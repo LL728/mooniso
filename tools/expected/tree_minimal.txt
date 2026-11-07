@@ -1,0 +1,3 @@
+/HELLO.TXT	file	17
+/SUB	dir	2048
+/SUB/INNER.TXT	file	11

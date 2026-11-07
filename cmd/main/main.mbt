@@ -70,6 +70,18 @@ fn print_listing(
 }
 
 ///|
+fn fs_create_dir(path : String) -> Unit raise @mooniso.IsoError {
+  if @fs.path_exists(path) {
+    return
+  }
+  @fs.create_dir(path) catch {
+    @fs.IOError::IOError(msg) => raise @mooniso.IsoError::HostIoError(msg)
+  }
+}
+
+///|
+
+///|
 /// 把宿主 I/O 错误转换成库的错误类型，避免调用方同时处理两套错误。
 fn fs_read_dir(path : String) -> ArrayView[String] raise @mooniso.IsoError {
   @fs.read_dir(path) catch {
@@ -142,6 +154,62 @@ fn pack_dir(
 }
 
 ///|
+fn print_tree(
+  image : @mooniso.IsoImage,
+  path : String,
+) -> Unit raise @mooniso.IsoError {
+  for entry in image.walk(path) {
+    let kind = if entry.is_dir { "dir" } else { "file" }
+    println("\{entry.path}\t\{kind}\t\{entry.size}")
+  }
+}
+
+///|
+fn extract_all(
+  image : @mooniso.IsoImage,
+  path : String,
+  out_dir : String,
+) -> Unit raise @mooniso.IsoError {
+  fs_create_dir(out_dir)
+  let mut count = 0
+  let mut skipped = 0
+  for entry in image.walk(path) {
+    let target = out_dir + entry.path
+    if entry.is_dir {
+      fs_create_dir(target)
+    } else if entry.is_symlink {
+      // 符号链接不落地（目标可能指向映像外），只统计
+      skipped = skipped + 1
+    } else {
+      fs_write_bytes(target, image.read_file(entry.path))
+      count = count + 1
+    }
+  }
+  println(
+    "extracted \{count} files to \{out_dir} (skipped \{skipped} symlinks)",
+  )
+}
+
+///|
+fn verify_image(image : @mooniso.IsoImage) -> Unit {
+  let report = image.validate()
+  println("directories=\{report.directories}")
+  println("files=\{report.files}")
+  println("symlinks=\{report.symlinks}")
+  println("bytes=\{report.total_bytes}")
+  println("joliet=\{image.uses_joliet()}")
+  println("rock_ridge=\{image.has_rock_ridge()}")
+  if report.problems.length() == 0 {
+    println("OK")
+  } else {
+    for problem in report.problems {
+      println("PROBLEM\t\{problem}")
+    }
+    println("FAILED (\{report.problems.length()} problems)")
+  }
+}
+
+///|
 fn create_image(
   out_path : String,
   src_dir : String,
@@ -178,7 +246,10 @@ fn main {
     if command != "info" &&
       command != "ls" &&
       command != "cat" &&
-      command != "extract" {
+      command != "extract" &&
+      command != "tree" &&
+      command != "extract-all" &&
+      command != "verify" {
       usage()
       return
     }
@@ -186,6 +257,16 @@ fn main {
     let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes(args[base + 1]))
     if command == "info" {
       print_info(image)
+    } else if command == "tree" {
+      print_tree(image, path)
+    } else if command == "verify" {
+      verify_image(image)
+    } else if command == "extract-all" {
+      if base + 2 >= args.length() {
+        usage()
+        return
+      }
+      extract_all(image, "/", args[base + 2])
     } else if command == "ls" {
       print_listing(image, path)
     } else if command == "cat" {

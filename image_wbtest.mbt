@@ -112,3 +112,23 @@ test "find_record reports missing paths" {
   }
   assert_true(failed)
 }
+
+///|
+test "walk lists the whole tree depth first" {
+  let entries = synthetic_image().walk("/")
+  assert_eq(entries.length(), 2)
+  assert_eq(entries[0].path, "/BIG.BIN")
+  assert_eq(entries[0].size, 5)
+  assert_eq(entries[0].is_dir, false)
+  assert_eq(entries[1].path, "/TAIL.TXT")
+}
+
+///|
+test "validate reports counts and no problems for a sound image" {
+  let report = synthetic_image().validate()
+  assert_eq(report.directories, 1)
+  assert_eq(report.files, 2)
+  assert_eq(report.symlinks, 0)
+  assert_eq(report.total_bytes, 6)
+  assert_eq(report.problems.length(), 0)
+}

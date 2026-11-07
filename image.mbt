@@ -363,6 +363,104 @@ pub fn IsoImage::read_file(
 }
 
 ///|
+/// 遍历结果的一项。
+pub struct WalkEntry {
+  path : String
+  is_dir : Bool
+  is_symlink : Bool
+  size : Int32
+}
+
+///|
+/// 递归遍历目录树（路径形如 /Docs/note.md，按物理顺序）。
+pub fn IsoImage::walk(
+  self : IsoImage,
+  path : String,
+) -> Array[WalkEntry] raise IsoError {
+  let out : Array[WalkEntry] = []
+  self.walk_into(path, "", out)
+  out
+}
+
+///|
+fn IsoImage::walk_into(
+  self : IsoImage,
+  path : String,
+  prefix : String,
+  out : Array[WalkEntry],
+) -> Unit raise IsoError {
+  for entry in self.list_dir(path) {
+    let child = prefix + "/" + entry.name
+    out.push(WalkEntry::{
+      path: child,
+      is_dir: entry.is_dir(),
+      is_symlink: entry.is_symlink(),
+      size: entry.size,
+    })
+    if entry.is_dir() {
+      self.walk_into(child, child, out)
+    }
+  }
+}
+
+///|
+/// 结构校验结果。
+pub struct ValidationReport {
+  directories : Int32
+  files : Int32
+  symlinks : Int32
+  total_bytes : Int32
+  problems : Array[String]
+}
+
+///|
+/// 遍历整棵目录树做结构校验：记录能否解析、extent 是否越界、文件能否读完。
+/// 返回全部问题而不是遇错即停，方便一次性给出体检结论。
+pub fn IsoImage::validate(self : IsoImage) -> ValidationReport {
+  let problems : Array[String] = []
+  let mut directories = 0
+  let mut files = 0
+  let mut symlinks = 0
+  let mut total_bytes = 0
+  let stack : Array[String] = ["/"]
+  while stack.length() > 0 {
+    let dir = stack.pop().unwrap()
+    directories = directories + 1
+    let entries = self.list_dir(dir) catch {
+      _ => {
+        problems.push("无法列出目录: " + dir)
+        continue
+      }
+    }
+    for entry in entries {
+      let child = if dir == "/" {
+        "/" + entry.name
+      } else {
+        dir + "/" + entry.name
+      }
+      if entry.is_dir() {
+        stack.push(child)
+      } else if entry.is_symlink() {
+        // 符号链接没有自身内容，只计数
+        symlinks = symlinks + 1
+      } else {
+        files = files + 1
+        total_bytes = total_bytes + entry.size
+        let bytes = Some(self.read_file(child)) catch { _ => None }
+        match bytes {
+          Some(data) =>
+            if data.length() != entry.size {
+              problems.push("读取长度不符: " + child)
+            }
+          None => problems.push("读取失败: " + child)
+        }
+      }
+    }
+  }
+  ValidationReport::{ directories, files, symlinks, total_bytes, problems, }
+}
+
+///|
 /// 文件大小（多段文件为各段之和）。
 pub fn IsoImage::file_size(
   self : IsoImage,
