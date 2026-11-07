@@ -125,6 +125,8 @@ def check_symlink(failures):
             for child in iso.list_children(rr_path="/"):
                 rr = child.rock_ridge
                 name = rr.name() if rr else None
+                if isinstance(name, bytes):
+                    name = name.decode("utf-8", "replace")
                 if name == "link.txt":
                     found = True
                     if not child.is_symlink():
