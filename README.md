@@ -16,6 +16,7 @@
 写入：
 
 - 从目录树生成映像：ISO 9660 level 1 名字（自动 8.3 化与去重）+ Joliet + Rock Ridge
+- 可生成 **El Torito 可启动映像**（启动记录卷描述符 + 启动目录 + 校验和）
 - 可分别关闭 Joliet / Rock Ridge；L、M 路径表按规范生成
 
 ## 演示
@@ -38,7 +39,17 @@ moon run cmd/main -- info    image.iso               # 卷信息 + 启动信息
 moon run cmd/main -- ls      image.iso /SUB          # 列目录
 moon run cmd/main -- cat     image.iso /HELLO.TXT    # 打印文本
 moon run cmd/main -- extract image.iso /BIG.BIN out  # 落盘（二进制安全）
+moon run cmd/main -- tree    image.iso               # 递归列出整棵树
+moon run cmd/main -- extract-all image.iso ./out     # 整树导出（跳过符号链接）
+moon run cmd/main -- verify  image.iso               # 结构体检
 moon run cmd/main -- create  out.iso ./some-dir      # 从目录生成映像
+moon run cmd/main -- create  out.iso ./some-dir --boot /boot.bin   # 生成可启动映像
+```
+
+最小可运行示例：
+
+```bash
+moon run examples/basic     # 内存里造映像 -> 读回 -> 列出 -> 校验
 ```
 
 ## 库 API
@@ -69,7 +80,7 @@ python tools/check_e2e.py               # CLI 输出与期望逐行比对
 
 python tools/gen_fixtures_pycdlib.py    # 用 pycdlib 生成 Joliet/Rock Ridge/El Torito 映像与基准清单
 python tools/check_compat.py            # 读取侧与 pycdlib 对拍
-python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib 读回比对
+python tools/check_roundtrip.py         # 写入侧：生成的映像由 pycdlib 读回比对（含可启动映像）
 ```
 
 对拍基线来自独立实现：**pycdlib**（Python）、**libarchive**、**Windows CDFS 驱动**、

@@ -110,6 +110,41 @@ def compare_mount(failures, mount_point, src_dir):
         print("ok   挂载后与源目录逐文件一致（%d 个文件）" % len(SAMPLE_FILES))
 
 
+def check_bootable(failures):
+    """写入侧：生成可启动 ISO，用 pycdlib 校验 El Torito 启动项。"""
+    tmp = tempfile.mkdtemp(prefix="mooniso-boot-")
+    try:
+        with open(os.path.join(tmp, "boot.bin"), "wb") as f:
+            f.write(bytes(4096))
+        with open(os.path.join(tmp, "hello.txt"), "wb") as f:
+            f.write(b"bootable\n")
+        image = os.path.join(tmp, "boot.iso")
+        run_cli(["create", image, tmp, "--boot", "/boot.bin"])
+        iso = pycdlib.PyCdlib()
+        iso.open(image)
+        try:
+            catalog = iso.eltorito_boot_catalog
+            entry = catalog.initial_entry
+            record = iso.get_record(iso_path="/BOOT.BIN;1")
+            checks = {
+                "platform_id": (catalog.validation_entry.platform_id, 0),
+                "boot_indicator": (entry.boot_indicator, 0x88),
+                "media_type": (entry.boot_media_type, 0),
+                "sector_count": (entry.sector_count, 4),
+                "load_rba": (entry.load_rba, record.extent_location()),
+                "joliet": (iso.has_joliet(), True),
+            }
+            bad = {k: v for k, v in checks.items() if v[0] != v[1]}
+            if bad:
+                failures.append("启动项与期望不符: %s" % bad)
+            else:
+                print("ok   可启动映像的 El Torito 启动项与 pycdlib 一致")
+        finally:
+            iso.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def mount_only(mount_point, src_dir):
     """--verify-mount <mnt> <src>：仅比对已挂载映像与源目录（供本地/CI 分步调用）。"""
     failures = []
@@ -129,6 +164,15 @@ def main():
             print("用法: check_roundtrip.py --verify-mount <挂载点> <源目录>")
             sys.exit(2)
         mount_only(args[1], args[2])
+        return
+    if args and args[0] == "--boot-only":
+        failures = []
+        check_bootable(failures)
+        if failures:
+            print("\n".join(failures))
+            print("FAILED")
+            sys.exit(1)
+        print("ALL PASS")
         return
     mount_point = None
     workdir = None
@@ -156,6 +200,7 @@ def main():
                 failures.append("条目不一致 %s: 生成=%s 期望=%s" % (rel, got.get(rel), want.get(rel)))
         if not failures:
             print("ok   pycdlib 读回的目录树一致（%d 个条目）" % len(want))
+        check_bootable(failures)
         if mount_point:
             compare_mount(failures, mount_point, src)
         # 生成物留在 %TEMP%，方便 --mount-point 调用方挂载前使用

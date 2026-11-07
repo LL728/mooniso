@@ -13,6 +13,11 @@ pub struct IsoBuilder {
   mut volume_id : String
   mut joliet : Bool
   mut rock_ridge : Bool
+  /// El Torito 启动映像在映像内的路径；None 表示不生成启动项
+  mut boot_path : String?
+  /// 启动映像需要加载的扇区数（写进启动目录）
+  mut boot_load_sectors : Int32
+  mut boot_platform : Int32
   dirs : Array[String]
   files : Array[(String, Bytes)]
 }
@@ -23,9 +28,25 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     volume_id: "MOONISO",
     joliet: true,
     rock_ridge: true,
+    boot_path: None,
+    boot_load_sectors: 4,
+    boot_platform: 0,
     dirs: ["/"],
     files: [],
   }
+}
+
+///|
+/// 指定 El Torito 启动映像（必须是已加入的文件路径），生成可启动 ISO。
+pub fn IsoBuilder::boot_image(
+  self : IsoBuilder,
+  path : String,
+  load_sectors : Int32,
+  platform : Int32,
+) -> Unit {
+  self.boot_path = Some(normalize_path(path))
+  self.boot_load_sectors = load_sectors
+  self.boot_platform = platform
 }
 
 ///|
@@ -369,6 +390,7 @@ priv struct OutDir {
 ///|
 /// 生成过程中的文件项。
 priv struct OutFile {
+  path : String
   name : String
   mut iso_name : String
   dir : Int32
@@ -473,6 +495,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       raise BadDescriptor(0)
     }
     files.push(OutFile::{
+      path,
       name: base_of(path),
       iso_name: "",
       dir: directory,
@@ -502,7 +525,23 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
     dirs[d].size = dirs[d].data.length()
   }
   // 布局：卷描述符 -> 路径表 -> ISO 目录 -> Joliet 目录 -> 文件内容
-  let terminator_lba = 16 + 1 + (if self.joliet { 1 } else { 0 })
+  // 描述符顺序：PVD(16) -> 启动记录(17，El Torito 要求紧跟 PVD) -> 补充卷 -> 结束符
+  let mut descriptor_lba = 17
+  let boot_record_lba = if self.boot_path is Some(_) {
+    let lba = descriptor_lba
+    descriptor_lba += 1
+    lba
+  } else {
+    -1
+  }
+  let svd_lba = if self.joliet {
+    let lba = descriptor_lba
+    descriptor_lba += 1
+    lba
+  } else {
+    -1
+  }
+  let terminator_lba = descriptor_lba
   let mut cursor = terminator_lba + 1
   let iso_l_pt = cursor
   cursor += 1
@@ -540,6 +579,11 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
     files[f].lba = cursor
     cursor += ceil_sectors(files[f].size, sector)
   }
+  let mut boot_catalog_lba = -1
+  if self.boot_path is Some(_) {
+    boot_catalog_lba = cursor
+    cursor += 1
+  }
   let total_sectors = cursor
   // 用真实 extent 重新生成目录数据
   for d = 0; d < dirs.length(); d = d + 1 {
@@ -573,6 +617,22 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   for f = 0; f < files.length(); f = f + 1 {
     write_at(files[f].lba, files[f].data)
   }
+  if self.boot_path is Some(path) {
+    let mut boot_lba = -1
+    for f = 0; f < files.length(); f = f + 1 {
+      if files[f].path == path {
+        boot_lba = files[f].lba
+      }
+    }
+    if boot_lba < 0 {
+      raise NotFound(path)
+    }
+    write_at(
+      boot_catalog_lba,
+      boot_catalog_sector(boot_lba, self.boot_load_sectors, self.boot_platform),
+    )
+    write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
+  }
   // 路径表
   let iso_table = path_table_bytes(dirs, false, false)
   write_at(iso_l_pt, iso_table)
@@ -595,7 +655,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
   )
   if self.joliet {
     write_at(
-      17,
+      svd_lba,
       make_svd(
         self,
         joliet_dirs[0],
@@ -976,5 +1036,65 @@ fn terminator_sector() -> Bytes {
     sector[1 + i] = magic[i]
   }
   sector[6] = b'\x01'
+  Bytes::from_array(sector[:])
+}
+
+///|
+/// El Torito 启动记录卷描述符（类型 0），指向启动目录所在逻辑块。
+fn boot_record_sector(catalog_lba : Int32) -> Bytes {
+  let sector = FixedArray::make(SECTOR_SIZE, b'\x00')
+  sector[0] = b'\x00'
+  let magic = ascii_bytes("CD001")
+  for i = 0; i < 5; i = i + 1 {
+    sector[1 + i] = magic[i]
+  }
+  sector[6] = b'\x01'
+  let id = ascii_bytes("EL TORITO SPECIFICATION")
+  for i = 0; i < id.length(); i = i + 1 {
+    sector[7 + i] = id[i]
+  }
+  sector[71] = (catalog_lba & 0xFF).to_byte()
+  sector[72] = ((catalog_lba >> 8) & 0xFF).to_byte()
+  sector[73] = ((catalog_lba >> 16) & 0xFF).to_byte()
+  sector[74] = ((catalog_lba >> 24) & 0xFF).to_byte()
+  Bytes::from_array(sector[:])
+}
+
+///|
+/// El Torito 启动目录：校验项（含校验和）+ 默认启动项。
+fn boot_catalog_sector(
+  boot_lba : Int32,
+  load_sectors : Int32,
+  platform : Int32,
+) -> Bytes {
+  let sector = FixedArray::make(SECTOR_SIZE, b'\x00')
+  sector[0] = b'\x01'
+  sector[1] = platform.to_byte()
+  let id = ascii_bytes("mooniso boot")
+  for i = 0; i < id.length(); i = i + 1 {
+    sector[4 + i] = id[i]
+  }
+  // 校验和：让校验项的前 16 个小端 16 位字之和为 0
+  // 0x55AA 这两个固定字节也参与求和，必须先写进去
+  sector[30] = b'\x55'
+  sector[31] = b'\xAA'
+  let mut sum = 0
+  for i = 0; i < 16; i = i + 1 {
+    let lo = sector[i * 2].to_uint().reinterpret_as_int()
+    let hi = sector[i * 2 + 1].to_uint().reinterpret_as_int()
+    sum = (sum + (lo | (hi << 8))) & 0xFFFF
+  }
+  let checksum = (0x10000 - sum) & 0xFFFF
+  sector[28] = (checksum & 0xFF).to_byte()
+  sector[29] = ((checksum >> 8) & 0xFF).to_byte()
+  // 默认启动项：可启动、无仿真、加载扇区数与加载地址
+  sector[32] = b'\x88'
+  sector[33] = b'\x00'
+  sector[38] = (load_sectors & 0xFF).to_byte()
+  sector[39] = ((load_sectors >> 8) & 0xFF).to_byte()
+  sector[40] = (boot_lba & 0xFF).to_byte()
+  sector[41] = ((boot_lba >> 8) & 0xFF).to_byte()
+  sector[42] = ((boot_lba >> 16) & 0xFF).to_byte()
+  sector[43] = ((boot_lba >> 24) & 0xFF).to_byte()
   Bytes::from_array(sector[:])
 }

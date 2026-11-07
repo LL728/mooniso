@@ -119,6 +119,7 @@ def capture_demo():
         "Docs/note.md": "# note\n".encode("utf-8"),
         "Docs/说明.txt": "中文内容\n".encode("utf-8"),
         "Docs/deep/payload.dat": bytes(range(256)) * 2,
+        "boot.bin": bytes(4096),
     }
     for rel, data in files.items():
         path = os.path.join(src, rel.replace("/", os.sep))
@@ -130,9 +131,9 @@ def capture_demo():
     cli = ["moon", "run", "--target", "js", "cmd/main", "--"]
 
     scenes = []
-    scenes.append({"title": "从目录生成 ISO 9660 映像",
-                   "cmd": "moon run cmd/main -- create out.iso ./src",
-                   "out": run(cli + ["create", image, src])[0]})
+    scenes.append({"title": "从目录生成可启动 ISO 9660 映像",
+                   "cmd": "moon run cmd/main -- create out.iso ./src --boot /boot.bin",
+                   "out": run(cli + ["create", image, src, "--boot", "/boot.bin"])[0]})
     scenes.append({"title": "读取卷信息（含 El Torito 启动项检测）",
                    "cmd": "moon run cmd/main -- info out.iso",
                    "out": run(cli + ["info", image])[0]})

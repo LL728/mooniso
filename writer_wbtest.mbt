@@ -71,3 +71,30 @@ test "directory records are stored in name order" {
   }
   assert_eq(names.join(","), "alpha.txt,zebra.txt")
 }
+
+///|
+test "builder can produce an El Torito bootable image" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("BOOTABLE")
+  builder.add_file("/boot.bin", Bytes::make(2048, b'\x00'))
+  builder.boot_image("/boot.bin", 4, 0)
+  let image = IsoImage::open(builder.build())
+  match image.boot_info() {
+    Some(info) => {
+      assert_true(info.bootable)
+      assert_eq(info.platform_id, 0)
+      assert_eq(info.media_type, 0)
+      assert_eq(info.sector_count, 4)
+      assert_true(info.load_lba > 0)
+    }
+    None => assert_true(false)
+  }
+}
+
+///|
+test "a non-bootable image reports no boot info" {
+  let builder = IsoBuilder::new()
+  builder.add_file("/x.txt", bytes_of([b'x']))
+  let image = IsoImage::open(builder.build())
+  assert_true(image.boot_info() is None)
+}

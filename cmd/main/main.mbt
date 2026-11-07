@@ -213,10 +213,18 @@ fn verify_image(image : @mooniso.IsoImage) -> Unit {
 fn create_image(
   out_path : String,
   src_dir : String,
+  boot_path : String?,
 ) -> Unit raise @mooniso.IsoError {
   let builder = @mooniso.IsoBuilder::new()
   builder.volume_id("MOONISO")
   pack_dir(builder, src_dir, "/")
+  match boot_path {
+    Some(path) => {
+      builder.boot_image(path, 4, 0)
+      println("boot image: \{path}")
+    }
+    None => ()
+  }
   fs_write_bytes(out_path, builder.build())
   println("created \{out_path} from \{src_dir}")
 }
@@ -240,7 +248,13 @@ fn main {
         usage()
         return
       }
-      create_image(args[base + 1], args[base + 2])
+      let mut boot : String? = None
+      for i = base + 3; i + 1 < args.length(); i = i + 1 {
+        if args[i] == "--boot" {
+          boot = Some(args[i + 1])
+        }
+      }
+      create_image(args[base + 1], args[base + 2], boot)
       return
     }
     if command != "info" &&
