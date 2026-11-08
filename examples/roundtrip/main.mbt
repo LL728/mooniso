@@ -1,6 +1,6 @@
 // 最小使用样例：在内存里生成一个映像，再把它读回来。
 //
-//     moon run examples/basic
+//     moon run examples/roundtrip
 
 ///|
 fn main {
