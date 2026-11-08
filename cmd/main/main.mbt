@@ -3,20 +3,95 @@
 // 输出是稳定的纯文本，便于与系统挂载结果做逐行对拍。
 
 ///|
+/// 一个子命令的元数据。用法文本由这张表渲染，不再各写一份。
+struct Subcommand {
+  name : String
+  argv : String
+  summary : String
+}
+
+///|
+fn subcommands() -> Array[Subcommand] {
+  let out : Array[Subcommand] = [
+    {
+      name: "info",
+      argv: "<image.iso>",
+      summary: "卷信息与 El Torito 启动信息",
+    },
+    {
+      name: "ls",
+      argv: "<image.iso> [path]",
+      summary: "列一级目录（默认 /）",
+    },
+    { name: "tree", argv: "<image.iso> [path]", summary: "递归列出子树", },
+    {
+      name: "cat",
+      argv: "<image.iso> <path>",
+      summary: "输出文件内容（UTF-8 解码）",
+    },
+    {
+      name: "extract",
+      argv: "<image.iso> <path> <out>",
+      summary: "落盘单个文件（二进制安全）",
+    },
+    {
+      name: "extract-all",
+      argv: "<image.iso> <dir>",
+      summary: "整树导出，跳过符号链接",
+    },
+    {
+      name: "verify",
+      argv: "<image.iso>",
+      summary: "结构体检：计数与问题清单",
+    },
+    {
+      name: "udf-ls",
+      argv: "<image.iso> [path]",
+      summary: "走 UDF 视角列目录",
+    },
+    {
+      name: "udf-cat",
+      argv: "<image.iso> <path>",
+      summary: "走 UDF 视角读文件",
+    },
+    {
+      name: "create",
+      argv: "<out.iso> <dir> [--boot p] [--efi p] [--link p=t] [--level 1|2|3] [--rr 109|112]",
+      summary: "从目录生成映像",
+    },
+  ]
+  out
+}
+
+///|
+fn find_subcommand(name : String) -> Subcommand? {
+  for spec in subcommands() {
+    if spec.name == name {
+      return Some(spec)
+    }
+  }
+  None
+}
+
+///|
+/// 每个子命令至少需要几个位置参数（表格之外还要单独声明，因为 argv 是给人看的字符串）。
+fn min_args(name : String) -> Int32 {
+  match name {
+    "info" | "verify" | "ls" | "tree" | "udf-ls" => 1
+    "cat" | "udf-cat" | "extract-all" | "create" => 2
+    "extract" => 3
+    _ => 0
+  }
+}
+
+///|
 fn usage() -> Unit {
-  println("usage:")
-  println(
-    "  mooniso info    <image.iso>                print volume information",
-  )
-  println(
-    "  mooniso ls      <image.iso> [path]         list a directory (default /)",
-  )
-  println(
-    "  mooniso cat     <image.iso> <path>         print a text file to stdout",
-  )
-  println(
-    "  mooniso extract <image.iso> <path> <out>   write a file to disk (binary safe)",
-  )
+  println("usage: mooniso <subcommand> [args...]")
+  for spec in subcommands() {
+    println("  \{spec.name} \{spec.argv}\n        \{spec.summary}")
+  }
+  println("")
+  println("退出码：0 成功，1 映像或 I/O 错误，2 用法错误")
 }
 
 ///|
@@ -283,11 +358,15 @@ fn run_cli(args : Array[String]) -> Int32 {
   if base < args.length() && args[base].has_suffix(".js") {
     base += 1
   }
-  if base + 1 >= args.length() {
+  if base >= args.length() {
     usage()
     return 2
   }
   let command = args[base]
+  if command == "--help" || command == "-h" || command == "help" {
+    usage()
+    return 0
+  }
   try {
     if command == "create" {
       if base + 2 >= args.length() {
@@ -336,15 +415,13 @@ fn run_cli(args : Array[String]) -> Int32 {
       )
       return 0
     }
-    if command != "info" &&
-      command != "ls" &&
-      command != "cat" &&
-      command != "extract" &&
-      command != "tree" &&
-      command != "extract-all" &&
-      command != "verify" &&
-      command != "udf-ls" &&
-      command != "udf-cat" {
+    if find_subcommand(command) is None {
+      println("ERROR\tunknown subcommand: \{command}\t[CLI-UNKNOWN]")
+      usage()
+      return 2
+    }
+    if base + min_args(command) >= args.length() {
+      println("ERROR\tmissing arguments for \{command}\t[CLI-ARGS]")
       usage()
       return 2
     }
@@ -388,51 +465,51 @@ fn run_cli(args : Array[String]) -> Int32 {
     return 0
   } catch {
     @mooniso.IsoError::Truncated => {
-      println("ERROR\ttruncated image")
+      println("ERROR\ttruncated image\t[E119-TRUNCATED]")
       return 1
     }
     @mooniso.IsoError::BadBothEndian => {
-      println("ERROR\tboth-endian fields disagree")
+      println("ERROR\tboth-endian fields disagree\t[E119-BOTH-ENDIAN]")
       return 1
     }
     @mooniso.IsoError::BadSignature => {
-      println("ERROR\tnot an ISO 9660 image (missing CD001)")
+      println("ERROR\tnot an ISO 9660 image (missing CD001)\t[E119-SIGNATURE]")
       return 1
     }
     @mooniso.IsoError::BadDescriptor(code) => {
-      println("ERROR\tbad volume descriptor (\{code})")
+      println("ERROR\tbad volume descriptor (\{code})\t[E119-DESCRIPTOR]")
       return 1
     }
     @mooniso.IsoError::NotFound(p) => {
-      println("ERROR\tno such path: \{p}")
+      println("ERROR\tno such path: \{p}\t[PATH-NOT-FOUND]")
       return 1
     }
     @mooniso.IsoError::NotDirectory(p) => {
-      println("ERROR\tnot a directory: \{p}")
+      println("ERROR\tnot a directory: \{p}\t[PATH-NOT-DIR]")
       return 1
     }
     @mooniso.IsoError::IsDirectory(p) => {
-      println("ERROR\tis a directory: \{p}")
+      println("ERROR\tis a directory: \{p}\t[PATH-IS-DIR]")
       return 1
     }
     @mooniso.IsoError::IsSymlink(p) => {
-      println("ERROR\tis a symlink: \{p}")
+      println("ERROR\tis a symlink: \{p}\t[PATH-IS-SYMLINK]")
       return 1
     }
     @mooniso.IsoError::HostIoError(msg) => {
-      println("ERROR\tI/O: \{msg}")
+      println("ERROR\tI/O: \{msg}\t[HOST-IO]")
       return 1
     }
     @mooniso.IsoError::BadDirectoryRecord(len) => {
-      println("ERROR\tbad directory record (\{len} bytes)")
+      println("ERROR\tbad directory record (\{len} bytes)\t[E119-RECORD]")
       return 1
     }
     @fs.IOError::IOError(msg) => {
-      println("ERROR\tI/O: \{msg}")
+      println("ERROR\tI/O: \{msg}\t[HOST-IO]")
       return 1
     }
     _ => {
-      println("ERROR\tunexpected failure")
+      println("ERROR\tunexpected failure\t[UNEXPECTED]")
       return 1
     }
   }

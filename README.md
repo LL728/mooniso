@@ -65,7 +65,7 @@ moon run examples/roundtrip
 | `udf-cat <iso> <path>` | 走 UDF 视角读文件 |
 | `create <out.iso> <dir>` | 从目录生成映像；`--boot` `--efi` `--link` `--level` `--rr` 可选 |
 
-退出码：`0` 成功，`1` 映像或 I/O 错误，`2` 用法错误。
+退出码：`0` 成功，`1` 映像或 I/O 错误，`2` 用法错误。`moon run cmd/main -- --help` 打印全部子命令与参数形态（由命令表生成，不会与实现脱钩）；错误行末尾带规范编号，便于脚本判别，例如 `[E119-TRUNCATED]`、`[PATH-NOT-FOUND]`。
 
 ```bash
 # BIOS + UEFI 双启动映像，并写入一个 Rock Ridge 符号链接
