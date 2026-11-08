@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """写入侧验收：用本库把目录打包成 ISO，再用独立实现读回比对。
 
-    python tools/check_roundtrip.py [--mount-point DIR]
+    python tools/oracle/pycdlib_write.py [--mount-point DIR]
 
 1) 始终做：pycdlib（独立实现）打开生成的映像，逐条比对名字/类型/大小；
 2) 可选：把已挂载的同一映像与源目录逐文件比对 sha256（--mount-point）。
@@ -18,7 +18,7 @@ import pycdlib
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SAMPLE_FILES = {
     "hello.txt": b"hello roundtrip\n",

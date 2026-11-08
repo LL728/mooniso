@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """生成演示视频：真实执行 mooniso 的命令，把实际输出渲染成终端动画（MP4）。
 
-    python tools/make_demo_video.py
+    python tools/demo/terminal_cast.py
 
 不依赖录屏：命令是真的跑、输出是真的抓，只是把它们渲染成逐帧动画后用 ffmpeg 编码。
 """
@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FFMPEG = os.environ.get(
     "MOONISO_FFMPEG",
     r"C:\Users\1510\Desktop\moon\_ffmpeg\_bin\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe",

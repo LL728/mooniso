@@ -1,4 +1,4 @@
-name: CI
+name: 规范符合性
 
 on:
   push:
@@ -6,13 +6,52 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# 三层门禁，各自回答一个独立问题：
+#   1. spec-gate      这张代码库本身是否干净（风格、警告、可构建）
+#   2. backend-matrix 同一套断言在两个后端上是否都成立
+#   3. oracle         我们的实现与"别人的实现"对同一份字节是否读出同样结果
 jobs:
-  check-build-test:
+  spec-gate:
+    name: 代码库自身门禁
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: 安装 Node（js 后端测试需要）
+      - name: 安装 MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: 更新注册表索引
+        run: moon update
+
+      - name: 风格（moon fmt --check）
+        run: moon fmt --check
+
+      - name: 静态检查 —— 任何警告按错误处理
+        run: moon check --target wasm-gc --deny-warn
+
+      - name: 构建 wasm-gc 产物
+        run: moon build --target wasm-gc
+
+  backend-matrix:
+    name: 单元测试 / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm-gc, js]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Node（js 后端测试所需运行时）
         uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -22,61 +61,70 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
-      - name: MoonBit 版本
-        run: moon version
+      - name: 更新注册表索引
+        run: moon update
+
+      - name: moon test --target ${{ matrix.target }}
+        run: moon test --target ${{ matrix.target }}
+
+  oracle:
+    name: 独立实现对拍
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Node（CLI 走 js 后端运行）
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: 安装 MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
       - name: 更新注册表索引
         run: moon update
 
-      - name: 格式检查
-        run: moon fmt --check
-
-      - name: 检查（警告即失败）
-        run: moon check --target wasm-gc --deny-warn
-
-      - name: 构建
-        run: moon build --target wasm-gc
-
-      - name: 单元测试（wasm-gc）
-        run: moon test --target wasm-gc
-
-      - name: 单元测试（js）
-        run: moon test --target js
-
-      - name: 生成测试映像（应与仓库内一致）
-        run: |
-          python3 tools/gen_fixtures.py
-          git diff --exit-code tools/corpus
-
-      - name: 端到端对拍（CLI 输出）
-        run: python3 tools/check_e2e.py
-
-      - name: 安装对拍用的独立实现（pycdlib）
+      - name: 安装 pycdlib（对拍用的另一种 ISO 实现）
         run: python3 -m pip install --quiet pycdlib
 
-      - name: 生成 pycdlib 测试映像并导出基准清单
+      # 我们自己按 ECMA-119 构造的映像必须逐字节复现，
+      # 否则"仓库里的期望输出"与"代码当前行为"就脱钩了。
+      - name: 重建自建映像并与仓库内版本逐字节比对
         run: |
-          python3 tools/gen_fixtures_pycdlib.py
-          python3 tools/gen_fixtures_udf.py
+          python3 tools/fixtures/build_corpus.py
+          git diff --exit-code tools/corpus tools/expected
 
-      - name: 读取侧对拍（Joliet / Rock Ridge / El Torito）
-        run: python3 tools/check_compat.py
+      - name: 生成 pycdlib 侧映像与基准清单
+        run: |
+          python3 tools/fixtures/pycdlib_corpus.py
+          python3 tools/fixtures/udf_corpus.py
 
-      - name: 写入侧验收（pycdlib 读回生成的映像）
-        run: python3 tools/check_roundtrip.py --workdir /tmp/mooniso-rt
+      - name: 读取侧 —— CLI 输出与期望逐行一致
+        run: python3 tools/oracle/cli_expectations.py
 
-      # 内核 iso9660 驱动读同一份映像，作为独立实现与 CLI 交叉验证。
-      # map=off：Linux 默认会把 ISO 名字转成小写，这里保留映像里的原始大小写。
-      - name: 内核挂载交叉验证（读取侧）
+      - name: 读取侧 —— 与 pycdlib 逐目录比对（Joliet / Rock Ridge / El Torito / UDF）
+        run: python3 tools/oracle/pycdlib_read.py
+
+      - name: 写入侧 —— 生成的映像由 pycdlib 读回比对
+        run: python3 tools/oracle/pycdlib_write.py --workdir /tmp/mooniso-rt
+
+      - name: 最小示例可运行（examples/roundtrip）
+        run: moon run --target js examples/roundtrip
+
+      # 内核 iso9660 驱动读同一份映像，作为与 pycdlib 完全无关的第三个判据。
+      # map=off：Linux 默认把 ISO 名字转小写，这里保留映像里的原始大小写。
+      - name: 内核挂载 —— 读取侧
         run: |
           sudo mkdir -p /mnt/mooniso
           sudo mount -o loop,ro,map=off -t iso9660 tools/corpus/minimal.iso /mnt/mooniso
-          python3 tools/check_e2e.py --mount-point /mnt/mooniso
+          python3 tools/oracle/cli_expectations.py --mount-point /mnt/mooniso
           sudo umount /mnt/mooniso
 
-      - name: 内核挂载交叉验证（写入侧：生成物挂载后逐字节比对）
+      - name: 内核挂载 —— 写入侧（生成物挂载后按内容逐字节比对）
         run: |
           sudo mkdir -p /mnt/mooniso-rt
           sudo mount -o loop,ro,map=off /tmp/mooniso-rt/out.iso /mnt/mooniso-rt
-          python3 tools/check_roundtrip.py --verify-mount /mnt/mooniso-rt /tmp/mooniso-rt/src
+          python3 tools/oracle/pycdlib_write.py --verify-mount /mnt/mooniso-rt /tmp/mooniso-rt/src
           sudo umount /mnt/mooniso-rt

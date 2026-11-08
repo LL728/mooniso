@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """端到端验收：用 CLI 读取仓库内的测试映像，与期望输出逐行/逐字节比对。
 
-    python tools/check_e2e.py
+    python tools/oracle/cli_expectations.py
 
 加 --mount-point-minimal <dir> 与 --mount-point-files <dir> 时，会把这些
 "已挂载的同一映像"的目录内容与 CLI 输出对照 —— 内核实现与本库读同一份字节，
@@ -18,7 +18,7 @@ import tempfile
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXPECTED = os.path.join(ROOT, "tools", "expected")
 
 CASES = [

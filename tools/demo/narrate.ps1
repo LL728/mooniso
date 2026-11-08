@@ -2,7 +2,8 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
 
-$outDir = 'C:\Users\1510\Desktop\moon\mooniso\docs\demo\narration'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$outDir = Join-Path $repoRoot 'docs/demo/narration'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $lines = @(

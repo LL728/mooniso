@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """用 pycdlib 生成 UDF 测试映像，并导出它的目录清单作为对拍基准。
 
-    python tools/gen_fixtures_udf.py
+    python tools/fixtures/udf_corpus.py
 
 产物：
     tools/corpus/udf.iso             ISO 9660 + UDF 2.60 双格式映像
@@ -17,7 +17,7 @@ import pycdlib
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS = os.path.join(HERE, "corpus")
 EXPECTED = os.path.join(HERE, "expected")
 

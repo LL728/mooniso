@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """用 pycdlib（独立实现）生成测试映像，并导出它的目录清单作为对拍基准。
 
-    python tools/gen_fixtures_pycdlib.py
+    python tools/fixtures/pycdlib_corpus.py
 
 产物：
     tools/corpus/joliet.iso          Joliet（UCS-2）名字的映像
@@ -19,7 +19,7 @@ import pycdlib
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS = os.path.join(HERE, "corpus")
 EXPECTED = os.path.join(HERE, "expected")
 

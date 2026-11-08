@@ -2,7 +2,7 @@
 """生成 ISO 9660 测试映像（ECMA-119）。
 
 只依赖标准库，产物是可复现的字节序列：
-    python tools/gen_fixtures.py
+    python tools/fixtures/build_corpus.py
 
 映像布局（逻辑块 2048 字节）：
     LBA 0-15   系统区（全零）
@@ -304,7 +304,7 @@ def pack_directory_flagged(self_lba, parent_lba, entries):
 
 def write_expected():
     """期望输出：CLI 逐行输出与文件内容的 sha256 清单，供对拍脚本使用。"""
-    exp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expected")
+    exp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "expected")
     os.makedirs(exp_dir, exist_ok=True)
     stamp = "2026-01-02T03:04:05"
     listing = "".join(
@@ -329,7 +329,7 @@ def write_expected():
 
 
 def main():
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus")
+    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "corpus")
     os.makedirs(out_dir, exist_ok=True)
     for name, data in (
         ("minimal.iso", build()),

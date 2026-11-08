@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """生成正式版演示视频：真实命令输出 + TTS 旁白 + 字幕 + 专业排版。
 
-    python tools/make_demo_video.py --official
+    python tools/demo/terminal_cast.py --official
 
 依赖：tools/gen_narration.ps1 先生成 docs/demo/narration/（含 manifest.json）。
 """
@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FFMPEG = os.environ.get(
     "MOONISO_FFMPEG",
     r"C:\Users\1510\Desktop\moon\_ffmpeg\_bin\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe",
@@ -176,7 +176,7 @@ def collect_scenes():
     })
     scenes.append({
         "title": "测试与对拍",
-        "cmd": "moon test --target wasm-gc  →  python tools/check_compat.py",
+        "cmd": "moon test --target wasm-gc  →  python tools/oracle/pycdlib_read.py",
         "out": "47 个测试，wasm-gc / js 双后端全绿\n读取侧对拍 pycdlib：Joliet / Rock Ridge / El Torito / UDF\n写入侧由 pycdlib 读回，并由内核挂载逐字节校验",
     })
     return scenes

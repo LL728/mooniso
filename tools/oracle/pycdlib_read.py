@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """与本机独立实现（pycdlib）的目录清单对拍。
 
-    python tools/gen_fixtures_pycdlib.py   # 先生成映像与基准清单
-    python tools/check_compat.py
+    python tools/fixtures/pycdlib_corpus.py   # 先生成映像与基准清单
+    python tools/oracle/pycdlib_read.py
 
 对拍内容：每个目录下的 (名字, 是否目录, 大小) 集合，本库 CLI 输出必须与 pycdlib 一致。
 """
@@ -14,7 +14,7 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXPECTED = os.path.join(ROOT, "tools", "expected")
 
 # (映像, pycdlib 基准清单)
