@@ -83,7 +83,19 @@ def check_boot(failures):
         print("ok   %s boot catalog matches pycdlib" % image)
 
 
+
+def ensure_fixtures():
+    """缺少对拍映像时先生成：新克隆的仓库不必手工跑生成脚本。"""
+    corpus = os.path.join(ROOT, "tools", "corpus")
+    missing = [n for n in ["joliet.iso", "rockridge.iso", "boot.iso", "udf.iso"] if not os.path.isfile(os.path.join(corpus, n))]
+    if not missing:
+        return
+    print("缺少对拍映像 %s，先调用生成脚本" % ", ".join(missing))
+    for script in ["tools/fixtures/pycdlib_corpus.py", "tools/fixtures/udf_corpus.py"]:
+        subprocess.run([sys.executable, os.path.join(ROOT, script)], cwd=ROOT, check=True)
+
 def main():
+    ensure_fixtures()
     failures = []
     checked = 0
     for image, manifest_name, command in CASES:

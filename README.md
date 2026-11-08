@@ -115,7 +115,7 @@ python tools/demo/official.py          # 正式版
 | 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9；>8 层路径由 Joliet / Rock Ridge 承载 |
 | zisofs、HFS / HFS+ 混合、FFI 绑定 | 不在 ISO 9660 本体与本项目声明的范围 |
 
-逐条条款见 [docs/conformance.md](docs/conformance.md)。
+逐条条款见 [docs/conformance.md](docs/conformance.md)；按规范写仍会写错的字节级坑位见 [docs/format-notes.md](docs/format-notes.md)。
 
 ## 来源与许可
 
