@@ -45,6 +45,9 @@ let image_bytes = builder.build()           // -> Bytes
 moon run examples/roundtrip
 ```
 
+包结构：`LL728/mooniso` 是对外门面（只转出类型），实现全在 `LL728/mooniso/impl`——
+字节序、卷描述符、目录记录、SUSP、El Torito、UDF、写入器各一块。底层解析函数留在实现包里，不作为接口承诺。
+
 ## 命令行
 
 以下命令针对本仓库源码，需在仓库根目录执行（`cmd/main` 是相对路径）。
