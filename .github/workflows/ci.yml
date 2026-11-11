@@ -110,6 +110,9 @@ jobs:
       - name: 写入侧 —— 生成的映像由 pycdlib 读回比对
         run: python3 tools/oracle/pycdlib_write.py --workdir /tmp/mooniso-rt
 
+      - name: UDF 版本边界 —— 不支持的布局必须显式拒绝
+        run: python3 tools/oracle/udf_bounds.py
+
       - name: 最小示例可运行（examples/roundtrip）
         run: moon run --target js examples/roundtrip
 

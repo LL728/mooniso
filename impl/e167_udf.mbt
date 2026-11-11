@@ -4,7 +4,70 @@
 //   -> Partition Descriptor（分区起点）+ Logical Volume Descriptor（块大小、File Set 位置）
 //   -> File Set Descriptor（根目录 ICB）-> File Entry（分配描述符）-> 目录 FID / 文件内容
 //
-// 覆盖现代安装镜像与 DVD/蓝光常见的 UDF 2.01+；不做 VAT（多区段写入）与元数据分区。
+// 范围：UDF 1.02（ECMA-167 第 2 版）单分区只读映像。
+//
+// 不覆盖的布局一律**明确报 UnsupportedLayout**，不做静默误读：
+//   - 元数据分区（UDF 2.50+ 用它将文件条目当作可重定位元数据，是 2.50/2.60 的必需寻址层）
+//   - 虚拟分区 / VAS（多区段写入的 VAT）
+//   - Sparable 分区（可重写介质的备用块映射）
+//   - 扩展文件条目（UDF 2.00+ 的 tag 266）
+
+///|
+/// 分区映射的类型标签：type0 / type1 / metadata / virtual / sparable。
+fn partition_map_kinds(lvd : Bytes) -> Array[String] {
+  let out : Array[String] = []
+  let count = read_le32(lvd, 268)
+  let table_len = read_le32(lvd, 264)
+  let end = if 440 + table_len > lvd.length() {
+    lvd.length()
+  } else {
+    440 + table_len
+  }
+  let mut at = 440
+  let mut seen = 0
+  while seen < count && at + 2 <= end {
+    let kind = lvd[at].to_uint().reinterpret_as_int()
+    let size = lvd[at + 1].to_uint().reinterpret_as_int()
+    if size < 2 || at + size > end {
+      break
+    }
+    if kind == 1 {
+      out.push("type1")
+    } else if kind == 2 {
+      // Type 2 映射的载荷是 EntityID：flags(1) + identifier(23) + suffix(8)
+      let ident = sub_bytes(lvd, at + 3, at + 26)
+      let text = ascii_of(ident)
+      if text == "*UDF Metadata Partition" {
+        out.push("metadata")
+      } else if text == "*UDF Virtual Partition" {
+        out.push("virtual")
+      } else if text == "*UDF Sparable Partition" {
+        out.push("sparable")
+      } else {
+        out.push("type2")
+      }
+    } else {
+      out.push("type0")
+    }
+    at = at + size
+    seen = seen + 1
+  }
+  out
+}
+
+///|
+/// 把定长 ASCII 字段转成字符串（截掉 NUL 与尾部空格）。
+fn ascii_of(raw : Bytes) -> String {
+  let mut out = ""
+  for i = 0; i < raw.length(); i = i + 1 {
+    let code = raw[i].to_uint().reinterpret_as_int()
+    if code == 0 {
+      break
+    }
+    out = out + Int32::unsafe_to_char(code).to_string()
+  }
+  out
+}
 
 ///|
 /// UDF 描述符公共头（tag），16 字节。
@@ -150,6 +213,18 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
     } else if t.id == 6 {
       block_size = read_le32(data, offset + 212)
       file_set = Some(read_long_ad(data, offset + 248))
+      // 这些布局改变了文件条目的寻址方式，必须显式拒绝而不是按普通分区读
+      for kind in partition_map_kinds(sub_bytes(data, offset, offset + 512)) {
+        if kind == "metadata" {
+          raise UnsupportedLayout("udf-metadata-partition")
+        }
+        if kind == "virtual" {
+          raise UnsupportedLayout("udf-virtual-partition")
+        }
+        if kind == "sparable" {
+          raise UnsupportedLayout("udf-sparable-partition")
+        }
+      }
     } else if t.id == 8 {
       break
     }
@@ -188,6 +263,10 @@ fn UdfImage::read_entry(
     raise Truncated
   }
   let tag = parse_tag(self.data, offset)
+  if tag.id == 266 {
+    // 扩展文件条目（UDF 2.00+）字段更多，本库按 1.02 的 File Entry 处理，遇到就停
+    raise UnsupportedLayout("udf-extended-file-entry")
+  }
   if tag.id != 261 {
     raise BadDescriptor(tag.id)
   }

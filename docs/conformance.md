@@ -61,6 +61,9 @@
 
 ## ECMA-167（UDF）
 
+**完整符合的版本：UDF 1.02**（OSTA UDF 1.02 / ECMA-167 第 2 版），单分区只读映像。
+下表只覆盖该版本；**1.50 / 2.00 / 2.01 / 2.50 / 2.60 均不在声明范围内**，原因见本节末表。
+
 | 结构 | 条款 | 实现 | 判别用例 | 判据 |
 |---|---|---|---|---|
 | 描述符 tag 校验和（除第 4 字节外 16 字节之和） | 3/7.2 | `impl/e167_udf.mbt` `parse_tag` | `tag checksum accepts a well formed descriptor` | pycdlib |
@@ -69,6 +72,21 @@
 | File Set Descriptor 与根目录 ICB | 4/14 | `UdfImage::open` | 同上 | pycdlib |
 | File Entry 与分配描述符（`short_ad` / `long_ad` / 内嵌数据） | 4/14.9 | `read_entry`、`node_data` | 经 `udf-ls`、`udf-cat` | pycdlib |
 | File Identifier Descriptor 与压缩标识（8 = Latin-1，16 = UTF-16BE） | 4/14.4 | `parse_fids`、`decode_dstring` | `dstring decodes latin-1 and utf-16` | pycdlib（中文名 `说明.txt`） |
+
+### UDF 版本与最终范围
+
+| 版本 | 文件条目寻址 | 本库行为 |
+|---|---|---|
+| UDF 1.02 | 普通分区 + File Entry（tag 261） | 完整读取（下表逐条） |
+| UDF 1.50 / 2.00 / 2.01 | 引入扩展文件条目（tag 266）、Sparable 分区等 | 不声明；遇到 tag 266 或 Sparable 映射返回 `UnsupportedLayout` |
+| UDF 2.50 / 2.60 | 文件条目作为可重定位元数据，经**元数据分区**寻址 | 不声明；检测到元数据分区映射返回 `UnsupportedLayout("udf-metadata-partition")` |
+| 多区段（任意版本） | 虚拟分区 + VAT 重映射 | 不声明；检测到虚拟分区映射返回 `UnsupportedLayout("udf-virtual-partition")` |
+
+这三类"不声明"都是**在解析时显式拒绝**，不会把结构读错后继续返回数据——判别用例：
+`type 2 metadata partition map is classified as metadata`、
+`image that declares a metadata partition is rejected explicitly`、
+`virtual partition map is not mistaken for a plain partition`；
+CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐一断言"退出码 1 + 诊断含 `[UDF-LAYOUT]`"。
 
 ## 写入侧布局（跨规范）
 
@@ -88,7 +106,7 @@
 | 不做的事 | 依据 |
 |---|---|
 | UDF 写入 | 职责边界：本库写入侧产出 ISO 9660 + Joliet + Rock Ridge，UDF 侧只提供读取 |
-| UDF 的 VAT（虚拟分配表）、元数据分区 | ECMA-167 4/15、4/10：多区段与元数据分区的写入语义，读侧未覆盖，写入侧不在范围 |
+| 元数据分区（UDF 2.50+）、VAT/虚拟分区、Sparable 分区、扩展文件条目 | 见上表：这些结构改变文件条目寻址，检测到即显式拒绝（`UnsupportedLayout`），不静默误读 |
 | 单个文件 > 4 GiB 的 UDF 读取 | ECMA-167 4/14.9 的 64 位信息长度：本实现按 32 位长度处理，超出时报错而不是截断 |
 | 多段文件写入 | ECMA-119 9.1.6：读侧已合并多段，写侧不拆分 |
 | CL / PL 深层目录重定位（写入） | IEEE P1282 §4.1.8 / §4.1.9：写侧不搬移目录，>8 层路径由 Joliet / Rock Ridge 名字承载 |

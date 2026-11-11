@@ -15,4 +15,7 @@ pub(all) suberror IsoError {
   /// 宿主 I/O 失败（库本身不做 I/O，由调用方转换进来）
   HostIoError(String)
   BadDirectoryRecord(Int32)
+  /// 影像合法但使用了本库不处理的布局（如 UDF 元数据分区）。
+  /// 参数是布局名，供调用方与 CI 断言使用，例如 "udf-metadata-partition"。
+  UnsupportedLayout(String)
 }

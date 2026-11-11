@@ -12,7 +12,7 @@
 | Joliet | 补充卷描述符、UCS-2 名字（含代理对） | 完整目录树 + UCS-2 路径表 | pycdlib、Windows 挂载 |
 | IEEE P1282（SUSP / Rock Ridge） | SP / ER / RR / NM / PX / SL / CE | NM / PX / SL / TF，1.09 与 1.12 两版 | pycdlib |
 | El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动） | pycdlib |
-| ECMA-167（UDF） | Anchor → 描述符序列 → File Set → File Entry → FID | —（只读） | pycdlib 的 UDF 视角 |
+| ECMA-167（UDF） | **UDF 1.02 单分区**：Anchor → 描述符序列 → File Set → File Entry → FID | —（只读） | pycdlib 的 UDF 视角 |
 
 条款级的「实现文件 / 判别用例 / 判据」三列对照见 [docs/conformance.md](docs/conformance.md)。
 
@@ -76,7 +76,7 @@ moon run cmd/main -- create out.iso ./rootfs --boot /boot.bin --efi /efi.img --l
 
 四类互不相同的判据，任何一类失败都会让 CI 变红：
 
-1. **单元测试 47 个**，wasm-gc 与 js 双后端各 47/47。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
+1. **单元测试 51 个**，wasm-gc 与 js 双后端各 51/51。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
 2. **与 pycdlib 对拍**：读取侧对 Joliet / Rock Ridge / El Torito / UDF 共 6 个目录逐条比对名字、类型、大小；写入侧把生成的映像交回 pycdlib 读，比对目录树、启动项、UEFI 分节、符号链接目标。
 3. **内核挂载**：CI 里用 Linux iso9660 驱动挂载我们自己生成的映像，按内容逐字节比对——驱动不认识我们的代码，只认识规范。
 4. **可复现性**：仓库内测试映像由 `tools/fixtures/build_corpus.py` 按规范构造，CI 每次重建并 `git diff --exit-code`，期望输出与代码行为不允许脱钩。
@@ -91,6 +91,7 @@ python tools/fixtures/udf_corpus.py
 python tools/oracle/cli_expectations.py          # CLI 输出与期望逐行一致
 python tools/oracle/pycdlib_read.py              # 读取侧对拍
 python tools/oracle/pycdlib_write.py             # 写入侧对拍
+python tools/oracle/udf_bounds.py                # UDF 版本边界：元数据/虚拟/Sparable 分区必须被拒绝
 ```
 
 ## 演示
@@ -111,7 +112,9 @@ python tools/demo/official.py          # 正式版
 | 不做 | 依据 |
 |---|---|
 | UDF 写入 | 写入侧产出 ISO 9660 / Joliet / Rock Ridge；UDF 只提供读取 |
-| UDF 的 VAT、元数据分区、>4 GiB 单文件 | ECMA-167 4/15、4/10、4/14.9；超出时报错，不静默截断 |
+| UDF 2.50 / 2.60 | 这两个版本的文件条目经**元数据分区**寻址（OSTA UDF 2.50 §2.3.10）：去掉该层无法定位 file entry，因此不声明兼容。检测到元数据分区映射即返回 `UnsupportedLayout("udf-metadata-partition")`，退出码 1 |
+| UDF 的 VAT（虚拟分区）、Sparable 分区、扩展文件条目（tag 266） | 多区段写入、可重写介质备用块、UDF 2.00+ 的更长文件条目头；三者都会改变寻址，检测到即返回 `UnsupportedLayout`，不按普通分区猜读 |
+| 单个文件 > 4 GiB | ECMA-167 4/14.9 的 64 位信息长度；本实现按 32 位处理，超出报错而非截断 |
 | 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9；>8 层路径由 Joliet / Rock Ridge 承载 |
 | zisofs、HFS / HFS+ 混合、FFI 绑定 | 不在 ISO 9660 本体与本项目声明的范围 |
 

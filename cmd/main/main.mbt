@@ -426,16 +426,19 @@ fn run_cli(args : Array[String]) -> Int32 {
       return 2
     }
     let path = if base + 2 < args.length() { args[base + 2] } else { "/" }
-    let image = @mooniso.IsoImage::open(@fs.read_file_to_bytes(args[base + 1]))
+    let raw = @fs.read_file_to_bytes(args[base + 1])
+    // UDF 命令只走 ECMA-167 这条路：纯 UDF 光盘（如蓝光）没有 ISO 9660 结构，
+    // 先按 ISO 9660 打开会在错误的地方失败。
     if command == "udf-ls" {
-      print_udf_listing(
-        @mooniso.UdfImage::open(@fs.read_file_to_bytes(args[base + 1])),
-        path,
-      )
-    } else if command == "udf-cat" {
-      let udf = @mooniso.UdfImage::open(@fs.read_file_to_bytes(args[base + 1]))
-      println(@utf8.decode_lossy(udf.read_file(path)))
-    } else if command == "info" {
+      print_udf_listing(@mooniso.UdfImage::open(raw), path)
+      return 0
+    }
+    if command == "udf-cat" {
+      println(@utf8.decode_lossy(@mooniso.UdfImage::open(raw).read_file(path)))
+      return 0
+    }
+    let image = @mooniso.IsoImage::open(raw)
+    if command == "info" {
       print_info(image)
     } else if command == "tree" {
       print_tree(image, path)
@@ -498,6 +501,10 @@ fn run_cli(args : Array[String]) -> Int32 {
     }
     @mooniso.IsoError::HostIoError(msg) => {
       println("ERROR\tI/O: \{msg}\t[HOST-IO]")
+      return 1
+    }
+    @mooniso.IsoError::UnsupportedLayout(name) => {
+      println("ERROR\tunsupported image layout: \{name}\t[UDF-LAYOUT]")
       return 1
     }
     @mooniso.IsoError::BadDirectoryRecord(len) => {
