@@ -177,7 +177,7 @@ def collect_scenes():
     scenes.append({
         "title": "测试与对拍",
         "cmd": "moon test --target wasm-gc  →  python tools/oracle/pycdlib_read.py",
-        "out": "47 个测试，wasm-gc / js 双后端全绿\n读取侧对拍 pycdlib：Joliet / Rock Ridge / El Torito / UDF\n写入侧由 pycdlib 读回，并由内核挂载逐字节校验",
+        "out": "57 个测试，wasm-gc / js 双后端全绿\n读取侧对拍 pycdlib：Joliet / Rock Ridge / El Torito / UDF\n写入侧由 pycdlib 读回，并由内核挂载逐字节校验",
     })
     return scenes
 
@@ -257,7 +257,7 @@ def render(scenes, manifest, out_path):
     draw.text((110, 340), "验证方式", font=ImageFont.truetype(FONT_CJK, 64), fill=GREEN)
     tail = ImageFont.truetype(FONT_CJK, 32)
     for i, text in enumerate([
-        "47 个单元测试（wasm-gc / js 双后端）",
+        "57 个单元测试（wasm-gc / js 双后端）",
         "读取侧对拍 pycdlib：Joliet / Rock Ridge / El Torito / UDF",
         "写入侧由 pycdlib 读回比对，并由内核挂载逐字节校验",
         "github.com/LL728/mooniso",
@@ -270,37 +270,50 @@ def render(scenes, manifest, out_path):
     return out_path
 
 
+def _run_ffmpeg(args, what):
+    """跑 ffmpeg，失败时把 stderr 尾巴抛出来，别让错误变成"文件不存在"。"""
+    proc = subprocess.run(
+        [FFMPEG] + args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "%s 失败（ffmpeg exit %d）：%s" % (what, proc.returncode, (proc.stderr or "")[-700:])
+        )
+    return proc
+
+
 def mux_audio(video_path, manifest, out_path):
-    """把旁白按场景顺序拼成完整音轨（统一重采样到 44.1kHz 单声道），再合进视频。"""
-    concat_file = os.path.join(NAR, "concat.txt")
-    with open(concat_file, "w", encoding="utf-8") as f:
-        f.write("file 'silence0.wav'\n")
-        for item in manifest:
-            f.write("file '%s'\n" % os.path.basename(item["wav"]))
-    # 先各自重采样到 44.1kHz mono，再顺序拼接（concat demuxer 要求一致参数）
+    """把旁白按场景顺序拼成完整音轨（统一 44.1kHz 单声道），再合进视频。"""
+    silence = os.path.join(NAR, "silence0.wav")
+    if not os.path.isfile(silence):
+        _run_ffmpeg(
+            ["-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.8", silence],
+            "生成开头静音",
+        )
     resampled = []
     for name in ["silence0.wav"] + [os.path.basename(m["wav"]) for m in manifest]:
         src = os.path.join(NAR, name)
         dst = os.path.join(NAR, "r_" + name)
-        subprocess.run(
-            [FFMPEG, "-y", "-i", src, "-ar", "44100", "-ac", "1", dst],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        _run_ffmpeg(["-y", "-i", src, "-ar", "44100", "-ac", "1", dst], "重采样 " + name)
         resampled.append(dst)
+    concat_file = os.path.join(NAR, "concat.txt")
     with open(concat_file, "w", encoding="utf-8") as f:
         for name in resampled:
             f.write("file '%s'\n" % os.path.basename(name))
     combined = os.path.join(NAR, "combined.wav")
-    subprocess.run(
-        [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", concat_file,
-         "-c", "copy", combined],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    _run_ffmpeg(
+        ["-y", "-f", "concat", "-safe", "0", "-i", concat_file, "-c", "copy", combined],
+        "拼接旁白",
     )
     final = out_path.replace(".mp4", "-final.mp4")
-    subprocess.run(
-        [FFMPEG, "-y", "-i", video_path, "-i", combined,
-         "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", final],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    _run_ffmpeg(
+        ["-y", "-i", video_path, "-i", combined, "-c:v", "copy", "-c:a", "aac",
+         "-shortest", "-movflags", "+faststart", final],
+        "合成音轨",
     )
     os.replace(final, out_path)
     return out_path

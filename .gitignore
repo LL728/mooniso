@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 _out/
 *.mbti
+# 演示旁白的中间产物：由 tools/demo/narrate.ps1 重录，不入库
+docs/demo/narration/*.wav
+docs/demo/narration/concat.txt

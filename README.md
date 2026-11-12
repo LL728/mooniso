@@ -107,6 +107,8 @@ pwsh -File tools/demo/narrate.ps1      # 旁白（System.Text→wav，需 Window
 python tools/demo/official.py          # 正式版
 ```
 
+旁白 wav 与中间产物不入库：`narrate.ps1` 按 `manifest.json` 重录后即可重建正式版，仓库只保留成品视频。
+
 ## 边界
 
 | 不做 | 依据 |

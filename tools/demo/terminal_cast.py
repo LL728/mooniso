@@ -253,7 +253,7 @@ def render(scenes, stats, out_path):
     draw.text((110, 300), "验证方式", font=big, fill=GREEN)
     tail = ImageFont.truetype(FONT_CJK, 30)
     for i, text in enumerate([
-        "32 个单元测试（wasm-gc / js 双后端）",
+        "57 个单元测试（wasm-gc / js 双后端）",
         "读取侧对拍 pycdlib：Joliet / Rock Ridge / El Torito",
         "写入侧由 pycdlib 读回比对，并由系统挂载逐字节校验",
         "github.com/LL728/mooniso",
