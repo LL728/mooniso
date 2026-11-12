@@ -76,7 +76,7 @@ moon run cmd/main -- create out.iso ./rootfs --boot /boot.bin --efi /efi.img --l
 
 四类互不相同的判据，任何一类失败都会让 CI 变红：
 
-1. **单元测试 53 个**，wasm-gc 与 js 双后端各 53/53。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
+1. **单元测试 57 个**，wasm-gc 与 js 双后端各 57/57。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
 2. **与 pycdlib 对拍**：读取侧对 Joliet / Rock Ridge / El Torito / UDF 共 6 个目录逐条比对名字、类型、大小；写入侧把生成的映像交回 pycdlib 读，比对目录树、启动项、UEFI 分节、符号链接目标。
 3. **内核挂载**：CI 里用 Linux iso9660 驱动挂载我们自己生成的映像，按内容逐字节比对——驱动不认识我们的代码，只认识规范。
 4. **可复现性**：仓库内测试映像由 `tools/fixtures/build_corpus.py` 按规范构造，CI 每次重建并 `git diff --exit-code`，期望输出与代码行为不允许脱钩。
