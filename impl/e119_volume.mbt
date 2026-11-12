@@ -19,10 +19,7 @@ pub struct PrimaryVolumeDescriptor {
 ///|
 /// 读取一个 2048 字节扇区并校验卷描述符签名。
 fn read_sector(data : Bytes, lba : Int32) -> ByteReader raise IsoError {
-  let start = lba * SECTOR_SIZE
-  if start < 0 || start + SECTOR_SIZE > data.length() {
-    raise Truncated
-  }
+  let start = block_offset(lba, SECTOR_SIZE, data.length())
   let r = ByteReader::new(data)
   r.seek(start)
   r

@@ -34,7 +34,8 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
   let pvd = parse_primary_volume_descriptor(data, pvd_lba)
   // 声明容量必须落在实际数据范围内，避免后续按越界 extent 读取
   if pvd.root.extent < 0 ||
-    (pvd.root.extent + 1) * pvd.logical_block_size > data.length() {
+    (pvd.root.extent.to_int64() + 1).to_int() * pvd.logical_block_size >
+    data.length() {
     raise Truncated
   }
   let joliet = find_joliet_descriptor(data)
@@ -186,11 +187,13 @@ fn IsoImage::read_directory_in(
   if !dir.is_dir() {
     raise NotDirectory(dir.name)
   }
-  let start = dir.extent * self.block_size
+  let start = extent_offset(
+    dir.extent,
+    dir.size,
+    self.block_size,
+    self.data.length(),
+  )
   let end = start + dir.size
-  if start < 0 || end > self.data.length() {
-    raise Truncated
-  }
   let reader = ByteReader::new(self.data)
   reader.seek(start)
   let out : Array[DirectoryRecord] = []
@@ -209,7 +212,7 @@ fn IsoImage::read_directory_in(
     }
     if len == 0 {
       // 填充：跳到下一个扇区边界
-      let next = (reader.position() / SECTOR_SIZE + 1) * SECTOR_SIZE
+      let next = (reader.position() / self.block_size + 1) * self.block_size
       reader.seek(if next > end { end } else { next })
     } else {
       out.push(record)
@@ -343,17 +346,28 @@ pub fn IsoImage::read_file(
   if records[0].is_symlink() {
     raise IsSymlink(path)
   }
-  let mut total = 0
+  // 先按 64 位累加并逐段校验边界，再分配：否则畸形映像可让一条记录声明 2 GiB，
+  // 在人工检查前就触发一次巨型分配。
+  let mut total64 : Int64 = 0
   for r in records {
-    total = total + r.size
+    if r.size < 0 {
+      raise Truncated
+    }
+    total64 = total64 + r.size.to_int64()
   }
+  if total64 > self.data.length().to_int64() {
+    raise Truncated
+  }
+  let total = total64.to_int()
   let out = FixedArray::make(total, b'\x00')
   let mut written = 0
   for r in records {
-    let start = r.extent * self.block_size
-    if r.size < 0 || start < 0 || start + r.size > self.data.length() {
-      raise Truncated
-    }
+    let start = extent_offset(
+      r.extent,
+      r.size,
+      self.block_size,
+      self.data.length(),
+    )
     for i = 0; i < r.size; i = i + 1 {
       out[written + i] = self.data[start + i]
     }
@@ -378,7 +392,7 @@ pub fn IsoImage::walk(
   path : String,
 ) -> Array[WalkEntry] raise IsoError {
   let out : Array[WalkEntry] = []
-  self.walk_into(path, "", out)
+  self.walk_into(path, "", out, 0)
   out
 }
 
@@ -388,7 +402,13 @@ fn IsoImage::walk_into(
   path : String,
   prefix : String,
   out : Array[WalkEntry],
+  depth : Int32,
 ) -> Unit raise IsoError {
+  // 目录图是"记录 → 块"的任意引用，畸形映像能让某条子目录记录指回祖先，
+  // 递归会无限下去。ECMA-119 的层级上限是 8，这里给宽松的 64 层再报损坏。
+  if depth > 64 {
+    raise BadDescriptor(0)
+  }
   for entry in self.list_dir(path) {
     let child = prefix + "/" + entry.name
     out.push(WalkEntry::{
@@ -398,7 +418,7 @@ fn IsoImage::walk_into(
       size: entry.size,
     })
     if entry.is_dir() {
-      self.walk_into(child, child, out)
+      self.walk_into(child, child, out, depth + 1)
     }
   }
 }
@@ -466,9 +486,15 @@ pub fn IsoImage::file_size(
   self : IsoImage,
   path : String,
 ) -> Int32 raise IsoError {
-  let mut total = 0
+  let mut total : Int64 = 0
   for r in self.find_records(path) {
-    total = total + r.size
+    if r.size < 0 {
+      raise Truncated
+    }
+    total = total + r.size.to_int64()
   }
-  total
+  if total > 2147483647L {
+    raise Truncated
+  }
+  total.to_int()
 }

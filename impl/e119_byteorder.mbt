@@ -134,3 +134,40 @@ pub fn ByteReader::read_ascii(
   }
   out.trim_end().to_owned()
 }
+
+///|
+/// 把逻辑块号换算成字节偏移。用 64 位中间量：32 位乘法会回绕，
+/// 回绕后仍可能落进映像范围，从而"读出错误数据"而不是报错。
+pub fn block_offset(
+  block : Int32,
+  block_size : Int32,
+  limit : Int32,
+) -> Int32 raise IsoError {
+  if block < 0 || block_size <= 0 {
+    raise Truncated
+  }
+  let off = block.to_int64() * block_size.to_int64()
+  if off < 0 || off + block_size.to_int64() > limit.to_int64() {
+    raise Truncated
+  }
+  off.to_int()
+}
+
+///|
+/// 校验 [block*block_size, block*block_size+size) 落在映像内，返回字节偏移。
+pub fn extent_offset(
+  block : Int32,
+  size : Int32,
+  block_size : Int32,
+  limit : Int32,
+) -> Int32 raise IsoError {
+  if block < 0 || size < 0 || block_size <= 0 {
+    raise Truncated
+  }
+  let off = block.to_int64() * block_size.to_int64()
+  let end = off + size.to_int64()
+  if off < 0 || end > limit.to_int64() {
+    raise Truncated
+  }
+  off.to_int()
+}

@@ -203,9 +203,8 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
   let mut file_set : UdfExtent? = None
   let blocks = sequence.length / 2048
   for i = 0; i < blocks; i = i + 1 {
-    let offset = (sequence.location + i) * 2048
-    if offset + 2048 > data.length() {
-      break
+    let offset = block_offset(sequence.location + i, 2048, data.length()) catch {
+      _ => break
     }
     let t = parse_tag(data, offset)
     if t.id == 5 {
@@ -236,10 +235,12 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
     Some(extent) => extent
     None => raise BadDescriptor(0)
   }
-  let fsd_offset = (partition_start + fsd.location) * block_size
-  if fsd_offset + 512 > data.length() {
-    raise Truncated
-  }
+  let fsd_offset = extent_offset(
+    partition_start + fsd.location,
+    512,
+    block_size,
+    data.length(),
+  )
   if parse_tag(data, fsd_offset).id != 256 {
     raise BadDescriptor(256)
   }
@@ -258,10 +259,12 @@ fn UdfImage::read_entry(
   self : UdfImage,
   icb : UdfExtent,
 ) -> UdfNode raise IsoError {
-  let offset = (self.partition_start + icb.location) * self.block_size
-  if offset + 176 > self.data.length() {
-    raise Truncated
-  }
+  let offset = extent_offset(
+    self.partition_start + icb.location,
+    176,
+    self.block_size,
+    self.data.length(),
+  )
   let tag = parse_tag(self.data, offset)
   if tag.id == 266 {
     // 扩展文件条目（UDF 2.00+）字段更多，本库按 1.02 的 File Entry 处理，遇到就停
@@ -315,10 +318,12 @@ fn UdfImage::node_data(self : UdfImage, node : UdfNode) -> Bytes raise IsoError 
   let out = FixedArray::make(total, b'\x00')
   let mut written = 0
   for extent in node.extents {
-    let start = (self.partition_start + extent.location) * self.block_size
-    if start < 0 || start + extent.length > self.data.length() {
-      raise Truncated
-    }
+    let start = extent_offset(
+      self.partition_start + extent.location,
+      extent.length,
+      self.block_size,
+      self.data.length(),
+    )
     for i = 0; i < extent.length; i = i + 1 {
       out[written + i] = self.data[start + i]
     }

@@ -149,8 +149,12 @@ pub fn parse_susp(
       let block = susp_u32_both(area, i + 4)
       let offset = susp_u32_both(area, i + 12)
       let clen = susp_u32_both(area, i + 20)
-      let start = block * block_size + offset
-      if start >= 0 && clen >= 0 && start + clen <= data.length() {
+      // CE 的位置用 64 位算：32 位乘法回绕后可能仍落进映像范围，从而读到错误区域
+      let start64 = block.to_int64() * block_size.to_int64() + offset.to_int64()
+      if start64 >= 0L &&
+        clen >= 0 &&
+        start64 + clen.to_int64() <= data.length().to_int64() {
+        let start = start64.to_int()
         parse_susp(
           data,
           block_size,

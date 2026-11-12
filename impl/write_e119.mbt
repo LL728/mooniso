@@ -476,7 +476,22 @@ fn rr_sp_er(rr_version : Int32) -> Bytes {
 ///|
 /// 按 ECMA-119 要求把若干记录打包成一个或多个逻辑块（记录不得跨扇区）。
 fn pack_records(records : Array[Bytes], sector : Int32) -> Bytes {
-  let out = FixedArray::make(records.length() * 256 + sector, b'\x00')
+  // 先算真实总长再分配：固定按"每条 256 字节"估算会在 SUSP 很长时越界写。
+  let mut needed = 0
+  for rec in records {
+    if needed % sector + rec.length() > sector {
+      needed = (needed / sector + 1) * sector
+    }
+    needed = needed + rec.length()
+  }
+  let out = FixedArray::make(
+    if needed % sector == 0 {
+      needed
+    } else {
+      (needed / sector + 1) * sector
+    },
+    b'\x00',
+  )
   let mut pos = 0
   for rec in records {
     if pos % sector + rec.length() > sector {
@@ -893,7 +908,7 @@ fn build_dir_records(
   rr : Bool,
   joliet_dirs : Array[OutDir],
   rr_version : Int32,
-) -> Array[Bytes] {
+) -> Array[Bytes] raise IsoError {
   let extent_of = fn(index : Int32) -> Int32 {
     if joliet_tree && index < joliet_dirs.length() {
       joliet_dirs[index].lba
@@ -980,9 +995,12 @@ fn build_dir_records(
       } else {
         Bytes::new(0)
       }
-      records.push(
-        make_dir_record(extent_of(index), size_of(index), 2, name, susp),
-      )
+      let rec = make_dir_record(extent_of(index), size_of(index), 2, name, susp)
+      if rec.length() > 255 {
+        // 记录长度字段只有一个字节；超长说明名字或 SUSP 太长，需要 CE 续接区（未实现）
+        raise UnsupportedLayout("iso9660-record-too-long")
+      }
+      records.push(rec)
     } else {
       let name = if joliet_tree {
         ucs2be_bytes(files[index].name + ";1")
@@ -1000,9 +1018,17 @@ fn build_dir_records(
       } else {
         Bytes::new(0)
       }
-      records.push(
-        make_dir_record(files[index].lba, files[index].size, flags, name, susp),
+      let rec = make_dir_record(
+        files[index].lba,
+        files[index].size,
+        flags,
+        name,
+        susp,
       )
+      if rec.length() > 255 {
+        raise UnsupportedLayout("iso9660-record-too-long")
+      }
+      records.push(rec)
     }
   }
   records
