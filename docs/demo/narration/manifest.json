@@ -2,49 +2,49 @@
   {
     "index": 0,
     "text": "mooniso，纯 MoonBit 的 ISO 9660 光盘映像读写库。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line00.wav",
+    "wav": "line00.wav",
     "duration": 9.89
   },
   {
     "index": 1,
     "text": "先从一个目录生成可启动映像，同时写入 BIOS 和 UEFI 启动项。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line01.wav",
+    "wav": "line01.wav",
     "duration": 11.873
   },
   {
     "index": 2,
     "text": "读取卷信息，正确识别出 El Torito 启动目录。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line02.wav",
+    "wav": "line02.wav",
     "duration": 8.134
   },
   {
     "index": 3,
     "text": "列出根目录，长文件名、中文名、空文件都能正确显示。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line03.wav",
+    "wav": "line03.wav",
     "duration": 10.704
   },
   {
     "index": 4,
     "text": "同一张光盘的 UDF 视图，也能直接读取。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line04.wav",
+    "wav": "line04.wav",
     "duration": 7.826
   },
   {
     "index": 5,
     "text": "导出文件，与源文件逐字节比对，完全一致。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line05.wav",
+    "wav": "line05.wav",
     "duration": 8.372
   },
   {
     "index": 6,
     "text": "生成的映像被 Windows 原生挂载，独立实现读回的内容一致。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line06.wav",
+    "wav": "line06.wav",
     "duration": 9.748
   },
   {
     "index": 7,
     "text": "五十七个测试，双后端全绿，读取侧与写入侧都经过独立实现对拍。",
-    "wav": "C:\\Users\\1510\\Desktop\\moon\\mooniso\\docs\\demo\\narration\\line07.wav",
+    "wav": "line07.wav",
     "duration": 11.966
   }
 ]

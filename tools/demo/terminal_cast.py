@@ -18,12 +18,19 @@ from PIL import Image, ImageDraw, ImageFont
 sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FFMPEG = os.environ.get(
-    "MOONISO_FFMPEG",
-    r"C:\Users\1510\Desktop\moon\_ffmpeg\_bin\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe",
-)
-FONT_ASCII = r"C:\Windows\Fonts\consola.ttf"
-FONT_CJK = r"C:\Windows\Fonts\msyh.ttc"
+def _resolve_ffmpeg():
+    """优先 MOONISO_FFMPEG，其次 PATH；都不行就交给 subprocess 报错，不写死本机路径。"""
+    env = os.environ.get("MOONISO_FFMPEG")
+    if env and os.path.isfile(env):
+        return env
+    found = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    return found or "ffmpeg"
+
+
+FFMPEG = _resolve_ffmpeg()
+_WINDIR = os.environ.get("WINDIR", r"C:\Windows")
+FONT_ASCII = os.path.join(_WINDIR, "Fonts", "consola.ttf")
+FONT_CJK = os.path.join(_WINDIR, "Fonts", "msyh.ttc")
 
 W, H, FPS = 1600, 900, 30
 BG = (13, 17, 23)
