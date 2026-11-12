@@ -504,7 +504,7 @@ fn run_cli(args : Array[String]) -> Int32 {
       return 1
     }
     @mooniso.IsoError::UnsupportedLayout(name) => {
-      println("ERROR\tunsupported image layout: \{name}\t[UDF-LAYOUT]")
+      println("ERROR\tunsupported image layout: \{name}\t[LAYOUT]")
       return 1
     }
     @mooniso.IsoError::BadDirectoryRecord(len) => {

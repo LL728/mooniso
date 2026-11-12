@@ -182,3 +182,36 @@ test "rr version 112 emits a 44-byte PX with serial number" {
   }
   assert_true(px_len_ok)
 }
+
+///|
+fn deep_path(levels : Int32) -> String {
+  let mut out = ""
+  for i = 0; i < levels; i = i + 1 {
+    out = out + "/d" + i.to_string()
+  }
+  out
+}
+
+///|
+test "writing past the 8 level directory limit is refused" {
+  let builder = IsoBuilder::new()
+  builder.add_file(deep_path(9) + "/f.txt", bytes_of([b'x']))
+  let code = try {
+    let _ = builder.build()
+    "built"
+  } catch {
+    UnsupportedLayout(name) => name
+    _ => "other-error"
+  }
+  assert_eq(code, "iso9660-directory-depth")
+}
+
+///|
+test "the depth limit can be waived explicitly" {
+  let builder = IsoBuilder::new()
+  builder.allow_deep_paths(true)
+  builder.add_file(deep_path(9) + "/f.txt", bytes_of([b'x']))
+  let image = IsoImage::open(builder.build())
+  let entries = image.walk("/")
+  assert_true(entries.length() > 0)
+}

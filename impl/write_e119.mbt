@@ -24,6 +24,8 @@ pub struct IsoBuilder {
   mut name_level : Int32
   /// Rock Ridge 版本：109 或 112
   mut rr_version : Int32
+  /// 允许写出超过 ECMA-119 规定的 8 层目录（默认拒绝，避免产出不合规映像）
+  mut allow_deep_paths : Bool
   dirs : Array[String]
   files : Array[(String, Bytes)]
   /// 符号链接：路径 -> 目标
@@ -42,10 +44,19 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     boot_platform: 0,
     name_level: 1,
     rr_version: 109,
+    allow_deep_paths: false,
     dirs: ["/"],
     files: [],
     symlinks: [],
   }
+}
+
+///|
+/// 允许写超过 8 层的目录树。ECMA-119 9.4 规定目录层级上限为 8，
+/// 深层路径需要 CL/PL 重定位（0.3.0 计划项）；默认拒绝，避免产出表面可读、
+/// 实则不符合规范的映像。
+pub fn IsoBuilder::allow_deep_paths(self : IsoBuilder, yes : Bool) -> Unit {
+  self.allow_deep_paths = yes
 }
 
 ///|
@@ -620,6 +631,20 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       size: 0,
       data: Bytes::new(0),
     })
+  }
+  // ECMA-119 9.4：目录层级最多 8 层。超过就要用 CL/PL 重定位（尚未实现）。
+  if !self.allow_deep_paths {
+    for path in paths {
+      let mut depth = 0
+      let mut at = path
+      while at != "/" && at != "" {
+        depth = depth + 1
+        at = parent_of(at)
+      }
+      if depth > 8 {
+        raise UnsupportedLayout("iso9660-directory-depth")
+      }
+    }
   }
   let files : Array[OutFile] = []
   for entry in self.files {

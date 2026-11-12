@@ -4,8 +4,8 @@
     python tools/oracle/udf_bounds.py
 
 构造只含"某个分区映射 + 空描述符序列"的最小映像，断言 CLI 的报错与退出码：
-    - 元数据分区（UDF 2.50+ 的必需寻址层）→ [UDF-LAYOUT]
-    - 虚拟分区（VAS/VAT，多区段写入）      → [UDF-LAYOUT]
+    - 元数据分区（UDF 2.50+ 的必需寻址层）→ [LAYOUT]
+    - 虚拟分区（VAS/VAT，多区段写入）      → [LAYOUT]
     - 普通 Type 1 分区                      → 不在本脚本断言（需要完整映像，另有单测覆盖）
 """
 
@@ -77,7 +77,7 @@ def main():
             code, out = run_cli(["udf-ls", path])
             if code != 1:
                 failures.append("%s：退出码应为 1，实际 %d（输出 %r）" % (layout, code, out))
-            elif "[UDF-LAYOUT]" not in out or layout not in out:
+            elif "[LAYOUT]" not in out or layout not in out:
                 failures.append("%s：诊断不符，实际 %r" % (layout, out))
             else:
                 print("ok   %s 被显式拒绝（退出码 1）" % layout)

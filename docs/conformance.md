@@ -86,7 +86,7 @@
 `type 2 metadata partition map is classified as metadata`、
 `image that declares a metadata partition is rejected explicitly`、
 `virtual partition map is not mistaken for a plain partition`；
-CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐一断言"退出码 1 + 诊断含 `[UDF-LAYOUT]`"。
+CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐一断言"退出码 1 + 诊断含 `[LAYOUT]`"。
 
 ## 写入侧布局（跨规范）
 
@@ -110,4 +110,6 @@ CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐�
 | 单个文件 > 4 GiB 的 UDF 读取 | ECMA-167 4/14.9 的 64 位信息长度：本实现按 32 位长度处理，超出时报错而不是截断 |
 | 多段文件写入 | ECMA-119 9.1.6：读侧已合并多段，写侧不拆分 |
 | CL / PL 深层目录重定位（写入） | IEEE P1282 §4.1.8 / §4.1.9：写侧不搬移目录，>8 层路径由 Joliet / Rock Ridge 名字承载 |
+| 目录层级 > 8（ECMA-119 9.4） | 未实现 CL/PL 重定位，因此 `build()` 默认拒绝（`UnsupportedLayout("iso9660-directory-depth")`）；`allow_deep_paths(true)` 可显式放行 |
+| 提取时还原符号链接 | `moonbitlang/x/fs` 无符号链接 API，纯 MoonBit 无 FFI 无法落地；`extract-all` 只报告数量 |
 | zisofs 压缩文件、HFS / HFS+ 混合 | 不在 ISO 9660 本体与本项目声明的范围 |

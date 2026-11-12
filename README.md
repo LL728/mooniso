@@ -76,7 +76,7 @@ moon run cmd/main -- create out.iso ./rootfs --boot /boot.bin --efi /efi.img --l
 
 四类互不相同的判据，任何一类失败都会让 CI 变红：
 
-1. **单元测试 51 个**，wasm-gc 与 js 双后端各 51/51。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
+1. **单元测试 53 个**，wasm-gc 与 js 双后端各 53/53。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
 2. **与 pycdlib 对拍**：读取侧对 Joliet / Rock Ridge / El Torito / UDF 共 6 个目录逐条比对名字、类型、大小；写入侧把生成的映像交回 pycdlib 读，比对目录树、启动项、UEFI 分节、符号链接目标。
 3. **内核挂载**：CI 里用 Linux iso9660 驱动挂载我们自己生成的映像，按内容逐字节比对——驱动不认识我们的代码，只认识规范。
 4. **可复现性**：仓库内测试映像由 `tools/fixtures/build_corpus.py` 按规范构造，CI 每次重建并 `git diff --exit-code`，期望输出与代码行为不允许脱钩。
@@ -115,7 +115,8 @@ python tools/demo/official.py          # 正式版
 | UDF 2.50 / 2.60 | 这两个版本的文件条目经**元数据分区**寻址（OSTA UDF 2.50 §2.3.10）：去掉该层无法定位 file entry，因此不声明兼容。检测到元数据分区映射即返回 `UnsupportedLayout("udf-metadata-partition")`，退出码 1 |
 | UDF 的 VAT（虚拟分区）、Sparable 分区、扩展文件条目（tag 266） | 多区段写入、可重写介质备用块、UDF 2.00+ 的更长文件条目头；三者都会改变寻址，检测到即返回 `UnsupportedLayout`，不按普通分区猜读 |
 | 单个文件 > 4 GiB | ECMA-167 4/14.9 的 64 位信息长度；本实现按 32 位处理，超出报错而非截断 |
-| 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9；>8 层路径由 Joliet / Rock Ridge 承载 |
+| 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9。ECMA-119 9.4 规定目录层级上限 8：超过时 `build()` 直接报 `UnsupportedLayout("iso9660-directory-depth")`，不产出表面可读、实则不合规的映像；确需深层路径时用 `allow_deep_paths(true)` 显式放行 |
+| 提取时还原符号链接 | 纯 MoonBit 无 FFI 时宿主无创建符号链接的 API（`moonbitlang/x/fs` 未提供）；`extract-all` 报告被跳过的链接数量，需要链接语义时挂载后用系统工具复制 |
 | zisofs、HFS / HFS+ 混合、FFI 绑定 | 不在 ISO 9660 本体与本项目声明的范围 |
 
 逐条条款见 [docs/conformance.md](docs/conformance.md)；按规范写仍会写错的字节级坑位见 [docs/format-notes.md](docs/format-notes.md)。
@@ -123,5 +124,10 @@ python tools/demo/official.py          # 正式版
 ## 来源与许可
 
 原创实现，未移植任何第三方源码。规范依据：ECMA-119、ECMA-167 / ISO 13346、El Torito Bootable CD-ROM Format Specification 1.0、IEEE P1282、Joliet Specification 1.0。行为仅对照 pycdlib（LGPL-2.1）、libarchive（BSD-2-Clause）、Windows CDFS 与 Linux 内核 isofs，全部只作测试判据，不随包分发。
+
+## 版本
+
+仓库当前 `0.3.0`（门面/实现分层、UDF 版本范围收敛）；mooncakes 上已发布 `0.2.0`。
+两者差异见 git 提交记录，`0.3.0` 发布前对外以 `0.2.0` 为准。
 
 Apache-2.0，见 [LICENSE](LICENSE)。
