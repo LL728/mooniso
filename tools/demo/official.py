@@ -331,11 +331,26 @@ def main():
     scenes = collect_scenes()
     manifest = load_narration()
     assert len(scenes) == len(manifest), "场景数与旁白数不一致"
+    # 旁白 wav 不在时提前失败，不渲染、不动仓库里已有的成品视频
+    missing = [
+        os.path.basename(m["wav"])
+        for m in manifest
+        if not os.path.isfile(os.path.join(NAR, os.path.basename(m["wav"])))
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "缺少旁白 wav：%s（先跑 tools/demo/narrate.ps1）" % ", ".join(missing)
+        )
     out_dir = os.path.join(ROOT, "docs", "demo")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "mooniso-demo-official.mp4")
-    render(scenes, manifest, out_path)
-    mux_audio(out_path, manifest, out_path)
+    # 先渲染到临时文件，mux 成功后再原子替换到成品路径：
+    # 任何一步失败都不会把好视频覆盖成半成品
+    tmp_video = os.path.join(out_dir, ".mooniso-demo-official.tmp.mp4")
+    render(scenes, manifest, tmp_video)
+    mux_audio(tmp_video, manifest, out_path)
+    if os.path.isfile(tmp_video):
+        os.remove(tmp_video)
     print("wrote %s (%.2f MB)" % (out_path, os.path.getsize(out_path) / 1024 / 1024))
 
 
