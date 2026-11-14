@@ -377,6 +377,75 @@ pub fn IsoImage::read_file(
 }
 
 ///|
+/// 区间读取：取文件 [offset, offset+length) 的一段，length 为 0 表示读到结尾。
+/// 相比 read_file，大文件不必整块二次拷贝；越界与目录/符号链接同样报错。
+pub fn IsoImage::read_range(
+  self : IsoImage,
+  path : String,
+  offset : Int32,
+  length : Int32,
+) -> Bytes raise IsoError {
+  let records = self.find_records(path)
+  if records[0].is_dir() {
+    raise IsDirectory(path)
+  }
+  if records[0].is_symlink() {
+    raise IsSymlink(path)
+  }
+  // 先按 64 位算总长，避免 32 位回绕
+  let mut total64 : Int64 = 0
+  for r in records {
+    if r.size < 0 {
+      raise Truncated
+    }
+    total64 = total64 + r.size.to_int64()
+  }
+  if total64 > self.data.length().to_int64() {
+    raise Truncated
+  }
+  let total = total64.to_int()
+  if offset < 0 || offset > total || length < 0 {
+    raise Truncated
+  }
+  let want = if length == 0 { total - offset } else { length }
+  if offset + want > total {
+    raise Truncated
+  }
+  let out = FixedArray::make(want, b'\x00')
+  // 用 64 位游标定位区间在「拼接后的文件」里的绝对位置，跨段拷贝
+  let mut seg_start : Int64 = 0
+  let mut written = 0
+  let offset64 = offset.to_int64()
+  let want64 = want.to_int64()
+  for r in records {
+    let seg_end = seg_start + r.size.to_int64()
+    let from64 = if offset64 > seg_start { offset64 } else { seg_start }
+    let to64 = if offset64 + want64 < seg_end {
+      offset64 + want64
+    } else {
+      seg_end
+    }
+    if from64 < to64 {
+      let start = extent_offset(
+        r.extent,
+        r.size,
+        self.block_size,
+        self.data.length(),
+      )
+      let mut i = (from64 - seg_start).to_int()
+      let n = (to64 - from64).to_int()
+      for _j = 0; _j < n; _j = _j + 1 {
+        out[written] = self.data[start + i]
+        written = written + 1
+        i = i + 1
+      }
+    }
+    seg_start = seg_end
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
 /// 遍历结果的一项。
 pub struct WalkEntry {
   path : String

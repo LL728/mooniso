@@ -132,3 +132,50 @@ test "validate reports counts and no problems for a sound image" {
   assert_eq(report.total_bytes, 6)
   assert_eq(report.problems.length(), 0)
 }
+
+///|
+/// 区间读取：只取文件的一段，避免大文件整块拷贝。
+test "read_range returns a slice of file content" {
+  let image = synthetic_image()
+  // BIG.BIN 两段：3 字节（01 02 03）+ 2 字节（04 05）
+  let head = image.read_range("/big.bin", 1, 3)
+  assert_eq(head.length(), 3)
+  assert_eq(head[0], b'\x02')
+  assert_eq(head[1], b'\x03')
+  assert_eq(head[2], b'\x04')
+}
+
+///|
+test "read_range with length 0 returns the rest" {
+  let image = synthetic_image()
+  let tail = image.read_range("/big.bin", 3, 0)
+  assert_eq(tail.length(), 2)
+  assert_eq(tail[0], b'\x04')
+  assert_eq(tail[1], b'\x05')
+}
+
+///|
+test "read_range out of bounds fails with Truncated" {
+  let image = synthetic_image()
+  let failed = try {
+    let _ = image.read_range("/big.bin", 4, 4)
+    false
+  } catch {
+    Truncated => true
+    _ => false
+  }
+  assert_true(failed)
+}
+
+///|
+test "read_range on a directory fails with IsDirectory" {
+  let image = synthetic_image()
+  let failed = try {
+    let _ = image.read_range("/", 0, 1)
+    false
+  } catch {
+    IsDirectory(_) => true
+    _ => false
+  }
+  assert_true(failed)
+}

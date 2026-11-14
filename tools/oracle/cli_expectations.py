@@ -118,6 +118,40 @@ def check_error_paths(failures):
         print("ok   extract-directory-rejected")
 
 
+def check_boot_info_table(failures):
+    """--boot-info-table 后，启动映像偏移 8 起应是 56 字节引导参数，且校验和为 0。"""
+    import struct
+    tmp = tempfile.mkdtemp(prefix="mooniso-bit-")
+    try:
+        rootfs = os.path.join(tmp, "rootfs")
+        os.makedirs(rootfs)
+        boot = bytearray(2048)
+        boot[0:4] = bytes([1, 2, 3, 4])
+        with open(os.path.join(rootfs, "boot.bin"), "wb") as f:
+            f.write(boot)
+        out = os.path.join(tmp, "out.iso")
+        run_cli(["create", out, rootfs, "--boot", "/boot.bin", "--boot-info-table"])
+        data = open(out, "rb").read()
+        catalog = struct.unpack("<I", data[17 * 2048 + 71:17 * 2048 + 75])[0]
+        boot_lba = struct.unpack("<I", data[catalog * 2048 + 40:catalog * 2048 + 44])[0]
+        off = boot_lba * 2048
+        bi_pvd = struct.unpack("<I", data[off + 8:off + 12])[0]
+        bi_file = struct.unpack("<I", data[off + 12:off + 16])[0]
+        bi_length = struct.unpack("<I", data[off + 16:off + 20])[0]
+        s = 0
+        for i in range(0, 2048, 4):
+            s = (s + struct.unpack("<I", data[off + i:off + i + 4])[0]) & 0xFFFFFFFF
+        ok = bi_pvd == 16 and bi_file == boot_lba and bi_length == 2048 and s == 0
+        if not ok:
+            failures.append(
+                "boot info table 不符: pvd=%d file=%d len=%d sum=%d" % (bi_pvd, bi_file, bi_length, s)
+            )
+        else:
+            print("ok   boot-info-table")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def listdir_set(path, failures, normalize=False):
     try:
         names = set(os.listdir(path))
@@ -167,6 +201,7 @@ def main():
     check_outputs(failures)
     check_extract(failures)
     check_error_paths(failures)
+    check_boot_info_table(failures)
     mounts = {"minimal": None, "files": None}
     argv = sys.argv[1:]
     for i, arg in enumerate(argv):

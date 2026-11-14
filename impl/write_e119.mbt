@@ -26,6 +26,8 @@ pub struct IsoBuilder {
   mut rr_version : Int32
   /// 允许写出超过 ECMA-119 规定的 8 层目录（默认拒绝，避免产出不合规映像）
   mut allow_deep_paths : Bool
+  /// 是否给 BIOS 启动映像写入 boot info table（syslinux/isolinux 需要）
+  mut boot_info_table : Bool
   dirs : Array[String]
   files : Array[(String, Bytes)]
   /// 符号链接：路径 -> 目标
@@ -45,6 +47,7 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     name_level: 1,
     rr_version: 109,
     allow_deep_paths: false,
+    boot_info_table: false,
     dirs: ["/"],
     files: [],
     symlinks: [],
@@ -83,6 +86,14 @@ pub fn IsoBuilder::boot_image_efi(
     self.boot_path = Some(normalize_path(path))
   }
   self.boot_load_sectors = load_sectors
+}
+
+///|
+/// 是否给 BIOS 启动映像写入 boot info table。
+/// syslinux/isolinux 的引导器在启动映像偏移 8 读 56 字节引导参数；不打补丁时
+/// 它对 isolinux 类引导器是「看着可启动、实际起不来」。UEFI 启动映像不需要。
+pub fn IsoBuilder::boot_info_table(self : IsoBuilder, yes : Bool) -> Unit {
+  self.boot_info_table = yes
 }
 
 ///|
@@ -858,6 +869,16 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       boot_catalog_sector(bios, efi, self.boot_platform),
     )
     write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
+    // boot info table：对 BIOS 启动映像打 56 字节补丁（偏移 8 起）
+    if self.boot_info_table {
+      let boot_lba = match self.boot_path {
+        Some(path) => find_lba(path)
+        None => -1
+      }
+      if boot_lba >= 0 {
+        patch_boot_info_table(image, boot_lba, sector)
+      }
+    }
   }
   // 路径表
   let iso_table = path_table_bytes(dirs, false, false)
@@ -1287,4 +1308,45 @@ fn terminator_sector() -> Bytes {
   }
   sector[6] = b'\x01'
   Bytes::from_array(sector[:])
+}
+
+///|
+/// 在启动映像偏移 8 写 boot info table（syslinux/isolinux 约定）：
+///   bi_pvd@8（PVD LBA=16）、bi_file@12（启动文件 LBA）、bi_length@16（字节长度）、
+///   bi_csum@20（让整个启动映像按 4 字节小端字求和为 0；校验字段自身按 0 计）。
+/// 总长 56 字节（偏移 8..64），超出部分不覆盖，避免破坏引导代码。
+fn patch_boot_info_table(
+  image : FixedArray[Byte],
+  boot_lba : Int32,
+  sector : Int32,
+) -> Unit {
+  let base = boot_lba * sector
+  // 全部按无符号 64 位读写，避免 Int32 在高位字节上符号扩展
+  let write_le32 = fn(off : Int32, value : Int64) -> Unit {
+    image[base + off] = (value & 0xFF).to_int().to_byte()
+    image[base + off + 1] = ((value >> 8) & 0xFF).to_int().to_byte()
+    image[base + off + 2] = ((value >> 16) & 0xFF).to_int().to_byte()
+    image[base + off + 3] = ((value >> 24) & 0xFF).to_int().to_byte()
+  }
+  let word_at = fn(off : Int32) -> Int64 {
+    let b0 = image[base + off].to_uint().reinterpret_as_int().to_int64()
+    let b1 = image[base + off + 1].to_uint().reinterpret_as_int().to_int64()
+    let b2 = image[base + off + 2].to_uint().reinterpret_as_int().to_int64()
+    let b3 = image[base + off + 3].to_uint().reinterpret_as_int().to_int64()
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+  }
+  write_le32(8, 16L) // bi_pvd：主卷描述符固定在第 16 块
+  write_le32(12, boot_lba.to_int64()) // bi_file
+  write_le32(16, sector.to_int64()) // bi_length：启动映像至少一扇区
+  // bi_csum=0 参与求和，累加全部 4 字节小端字，回填使 32 位无符号总和为 0
+  let mut sum : Int64 = 0
+  let mut i = 0
+  while i < sector {
+    if i != 20 {
+      sum = sum + word_at(i)
+    }
+    i = i + 4
+  }
+  let csum = (0x100000000L - sum % 0x100000000L) % 0x100000000L
+  write_le32(20, csum)
 }

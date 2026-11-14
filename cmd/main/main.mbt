@@ -56,7 +56,7 @@ fn subcommands() -> Array[Subcommand] {
     },
     {
       name: "create",
-      argv: "<out.iso> <dir> [--boot p] [--efi p] [--link p=t] [--level 1|2|3] [--rr 109|112]",
+      argv: "<out.iso> <dir> [--boot p] [--efi p] [--link p=t] [--level 1|2|3] [--rr 109|112] [--boot-info-table]",
       summary: "从目录生成映像",
     },
   ]
@@ -310,11 +310,16 @@ fn create_image(
   links : Array[String],
   name_level : Int32,
   rr_version : Int32,
+  boot_info_table : Bool,
 ) -> Unit raise @mooniso.IsoError {
   let builder = @mooniso.IsoBuilder::new()
   builder.volume_id("MOONISO")
   builder.name_level(name_level)
   builder.rr_version(rr_version)
+  if boot_info_table {
+    builder.boot_info_table(true)
+    println("boot info table: on")
+  }
   pack_dir(builder, src_dir, "/")
   match boot_path {
     Some(path) => {
@@ -377,25 +382,29 @@ fn run_cli(args : Array[String]) -> Int32 {
       let mut efi : String? = None
       let mut name_level = 1
       let mut rr_version = 109
+      let mut boot_info_table = false
       let links : Array[String] = []
-      for i = base + 3; i + 1 < args.length(); i = i + 1 {
-        if args[i] == "--boot" {
+      for i = base + 3; i < args.length(); i = i + 1 {
+        if args[i] == "--boot" && i + 1 < args.length() {
           boot = Some(args[i + 1])
         }
-        if args[i] == "--efi" {
+        if args[i] == "--efi" && i + 1 < args.length() {
           efi = Some(args[i + 1])
         }
-        if args[i] == "--link" {
+        if args[i] == "--link" && i + 1 < args.length() {
           links.push(args[i + 1])
         }
-        if args[i] == "--level" {
+        if args[i] == "--level" && i + 1 < args.length() {
           let parsed = Some(@string.parse_int(args[i + 1])) catch { _ => None }
           match parsed {
             Some(level) if level >= 1 && level <= 3 => name_level = level
             _ => ()
           }
         }
-        if args[i] == "--rr" {
+        if args[i] == "--boot-info-table" {
+          boot_info_table = true
+        }
+        if args[i] == "--rr" && i + 1 < args.length() {
           let parsed = Some(@string.parse_int(args[i + 1])) catch { _ => None }
           match parsed {
             Some(version) if version == 109 || version == 112 =>
@@ -412,6 +421,7 @@ fn run_cli(args : Array[String]) -> Int32 {
         links,
         name_level,
         rr_version,
+        boot_info_table,
       )
       return 0
     }

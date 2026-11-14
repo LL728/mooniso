@@ -215,3 +215,68 @@ test "the depth limit can be waived explicitly" {
   let entries = image.walk("/")
   assert_true(entries.length() > 0)
 }
+
+///|
+/// 读映像里某偏移的 32 位小端值（测试用）。
+fn le32_at(data : Bytes, off : Int32) -> Int32 {
+  data[off].to_uint().reinterpret_as_int() |
+  (data[off + 1].to_uint().reinterpret_as_int() << 8) |
+  (data[off + 2].to_uint().reinterpret_as_int() << 16) |
+  (data[off + 3].to_uint().reinterpret_as_int() << 24)
+}
+
+///|
+test "boot info table writes pvd, file lba, length and zero-sum checksum" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("BIT")
+  let boot = FixedArray::make(2048, b'\x00')
+  boot[0] = b'\x01'
+  boot[1] = b'\x02'
+  boot[2] = b'\x03'
+  boot[3] = b'\x04'
+  builder.add_file("/boot.bin", Bytes::from_array(boot[:]))
+  builder.boot_image("/boot.bin", 4, 0)
+  builder.boot_info_table(true)
+  let img = builder.build()
+  let image = IsoImage::open(img)
+  let rec = image.find_record("/boot.bin")
+  let off = rec.extent * 2048
+  // bi_pvd = 16（PVD 固定 LBA）
+  assert_eq(le32_at(img, off + 8), 16)
+  // bi_file = 启动文件自身 LBA
+  assert_eq(le32_at(img, off + 12), rec.extent)
+  // bi_length = 2048
+  assert_eq(le32_at(img, off + 16), 2048)
+  // 校验和：全文件按无符号 4 字节小端字累加（bi_csum 已回填），总和应为 0 mod 2^32
+  let uword = fn(o : Int32) -> Int64 {
+    let b0 = img[o].to_uint().reinterpret_as_int().to_int64()
+    let b1 = img[o + 1].to_uint().reinterpret_as_int().to_int64()
+    let b2 = img[o + 2].to_uint().reinterpret_as_int().to_int64()
+    let b3 = img[o + 3].to_uint().reinterpret_as_int().to_int64()
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+  }
+  let mut sum : Int64 = 0
+  let mut i = 0
+  while i < 2048 {
+    sum = sum + uword(off + i)
+    i = i + 4
+  }
+  assert_eq((sum % 0x100000000L).to_int(), 0)
+}
+
+///|
+test "boot info table is off by default and leaves offset 8 untouched" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("NOPATCH")
+  let boot = FixedArray::make(2048, b'\x00')
+  boot[0] = b'\xAA'
+  builder.add_file("/boot.bin", Bytes::from_array(boot[:]))
+  builder.boot_image("/boot.bin", 4, 0)
+  let img = builder.build()
+  let image = IsoImage::open(img)
+  let rec = image.find_record("/boot.bin")
+  let off = rec.extent * 2048
+  // 默认不打补丁：偏移 8 仍是 0
+  assert_eq(img[off + 8].to_uint().reinterpret_as_int(), 0)
+  assert_eq(img[off + 0].to_uint().reinterpret_as_int(), 0xAA)
+}

@@ -11,7 +11,7 @@
 | ECMA-119（ISO 9660） | 卷描述符链、目录记录、多段文件、路径解析、文件读取 | 名字级别 1/2/3、目录记录、L/M 路径表、块分配 | pycdlib、Linux 内核 isofs、Windows CDFS |
 | Joliet | 补充卷描述符、UCS-2 名字（含代理对） | 完整目录树 + UCS-2 路径表 | pycdlib、Windows 挂载 |
 | IEEE P1282（SUSP / Rock Ridge） | SP / ER / RR / NM / PX / SL / CE | NM / PX / SL / TF，1.09 与 1.12 两版 | pycdlib |
-| El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动） | pycdlib |
+| El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动），可选 boot info table（`--boot-info-table`，供 syslinux/isolinux） | pycdlib、mkisofs 约定 |
 | ECMA-167（UDF） | **UDF 1.02 单分区**：Anchor → 描述符序列 → File Set → File Entry → FID | —（只读） | pycdlib 的 UDF 视角 |
 
 条款级的「实现文件 / 判别用例 / 判据」三列对照见 [docs/conformance.md](docs/conformance.md)。
@@ -30,6 +30,9 @@ for entry in image.walk("/") {             // 递归列树
   println("{entry.path}\t{entry.size}")
 }
 let data = image.read_file("/HELLO.TXT")   // 取内容（多段、跨扇区、越界拒绝）
+
+// 区间读取：只取大文件的一段，避免整块拷贝
+let head = image.read_range("/BIG.BIN", 0, 4096)
 
 // 造一张映像
 let builder = @mooniso.IsoBuilder::new()
@@ -63,7 +66,7 @@ moon run examples/roundtrip
 | `verify <iso>` | 结构体检：目录数、文件数、字节数、问题清单 |
 | `udf-ls <iso> [path]` | 走 UDF 视角列目录 |
 | `udf-cat <iso> <path>` | 走 UDF 视角读文件 |
-| `create <out.iso> <dir>` | 从目录生成映像；`--boot` `--efi` `--link` `--level` `--rr` 可选 |
+| `create <out.iso> <dir>` | 从目录生成映像；`--boot` `--efi` `--link` `--level` `--rr` `--boot-info-table` 可选 |
 
 退出码：`0` 成功，`1` 映像或 I/O 错误，`2` 用法错误。`moon run cmd/main -- --help` 打印全部子命令与参数形态（由命令表生成，不会与实现脱钩）；错误行末尾带规范编号，便于脚本判别，例如 `[E119-TRUNCATED]`、`[PATH-NOT-FOUND]`。
 
