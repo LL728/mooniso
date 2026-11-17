@@ -93,15 +93,17 @@ fn read_le32(data : Bytes, offset : Int32) -> Int32 {
 ///|
 
 ///|
-/// UDF 的信息长度是 64 位；本实现只支持 4 GiB 以内的文件，超出返回 -1。
-fn read_length64(data : Bytes, offset : Int32) -> Int32 {
+/// UDF 的信息长度是 64 位（ECMA-167 4/14.9）；本库只实现低 32 位。
+/// 高 32 位非零（单文件 > 4 GiB）时显式拒绝：若返回 -1，这个负数会流进
+/// UdfNode.size / UdfEntry.size，调用方会把 -1 当成合法长度（udf-ls 会打印 size=-1），
+/// 与 README / conformance 声明的「超出报错不截断」冲突。
+fn read_length64(data : Bytes, offset : Int32) -> Int32 raise IsoError {
   let hi = read_le32(data, offset + 4)
   let lo = read_le32(data, offset)
   if hi != 0 {
-    -1
-  } else {
-    lo
+    raise UnsupportedLayout("udf-file-over-4gib")
   }
+  lo
 }
 
 ///|

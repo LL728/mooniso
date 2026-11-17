@@ -119,7 +119,7 @@ python tools/demo/official.py          # 正式版
 | UDF 写入 | 写入侧产出 ISO 9660 / Joliet / Rock Ridge；UDF 只提供读取 |
 | UDF 2.50 / 2.60 | 这两个版本的文件条目经**元数据分区**寻址（OSTA UDF 2.50 §2.3.10）：去掉该层无法定位 file entry，因此不声明兼容。检测到元数据分区映射即返回 `UnsupportedLayout("udf-metadata-partition")`，退出码 1 |
 | UDF 的 VAT（虚拟分区）、Sparable 分区、扩展文件条目（tag 266） | 多区段写入、可重写介质备用块、UDF 2.00+ 的更长文件条目头；三者都会改变寻址，检测到即返回 `UnsupportedLayout`，不按普通分区猜读 |
-| 单个文件 > 4 GiB | ECMA-167 4/14.9 的 64 位信息长度；本实现按 32 位处理，超出报错而非截断 |
+| 单个文件 > 4 GiB | ECMA-167 4/14.9 的 64 位信息长度；本实现按 32 位处理，高 32 位非零时返回 `UnsupportedLayout("udf-file-over-4gib")`，不截断 |
 | 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9。ECMA-119 9.4 规定目录层级上限 8：超过时 `build()` 直接报 `UnsupportedLayout("iso9660-directory-depth")`，不产出表面可读、实则不合规的映像；确需深层路径时用 `allow_deep_paths(true)` 显式放行 |
 | 提取时还原符号链接 | 纯 MoonBit 无 FFI 时宿主无创建符号链接的 API（`moonbitlang/x/fs` 未提供）；`extract-all` 报告被跳过的链接数量，需要链接语义时挂载后用系统工具复制 |
 | zisofs、HFS / HFS+ 混合、FFI 绑定 | 不在 ISO 9660 本体与本项目声明的范围 |
