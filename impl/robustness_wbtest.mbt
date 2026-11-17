@@ -30,7 +30,7 @@ fn robust_image(
 ///|
 test "block number that would overflow 32 bit is rejected, not wrapped" {
   // 2^21 * 2048 = 2^32：32 位乘法回绕成 0，回绕后会"读到第 0 块"而不是报错
-  let data = Bytes::new(4 * 2048)
+  let data = Bytes::make(4 * 2048, b'\x00')
   let image = robust_image(data, 2097152, 2048)
   let failed = try {
     let _ = image.list_dir("/")
