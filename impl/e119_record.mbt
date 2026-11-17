@@ -159,7 +159,7 @@ pub fn parse_directory_record_in(
           second: 0,
           gmt_offset_quarters: 0,
         },
-        system_use: Bytes::new(0),
+        system_use: Bytes::make(0, b'\x00'),
         posix_mode: None,
         symlink_target: None,
       },
@@ -207,7 +207,7 @@ pub fn parse_directory_record_in(
   let system_use = if consumed < len {
     reader.read_bytes(len - consumed)
   } else {
-    Bytes::new(0)
+    Bytes::make(0, b'\x00')
   }
   (
     DirectoryRecord::{

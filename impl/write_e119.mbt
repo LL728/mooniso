@@ -373,7 +373,7 @@ fn make_dir_record(
   let padding = if name_bytes.length() % 2 == 0 {
     Bytes::from_array([b'\x00'][:])
   } else {
-    Bytes::new(0)
+    Bytes::make(0, b'\x00')
   }
   let total = concat_bytes([Bytes::from_array(fixed[:]), name, padding, susp])
   let out = FixedArray::make(total.length(), b'\x00')
@@ -425,7 +425,7 @@ fn rr_susp(
   ])
   let sl = match symlink {
     Some(target) => sl_entry(target)
-    None => Bytes::new(0)
+    None => Bytes::make(0, b'\x00')
   }
   concat_bytes([rr, nm, px, tf, sl])
 }
@@ -635,7 +635,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       parent: -1,
       lba: 0,
       size: 0,
-      data: Bytes::new(0),
+      data: Bytes::make(0, b'\x00'),
     },
   ]
   let paths : Array[String] = ["/"]
@@ -655,7 +655,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       parent,
       lba: 0,
       size: 0,
-      data: Bytes::new(0),
+      data: Bytes::make(0, b'\x00'),
     })
   }
   // ECMA-119 9.4：目录层级最多 8 层。超过就要用 CL/PL 重定位（尚未实现）。
@@ -704,7 +704,7 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       dir: directory,
       lba: 0,
       size: 0,
-      data: Bytes::new(0),
+      data: Bytes::make(0, b'\x00'),
       symlink: Some(target),
     })
   }
@@ -953,7 +953,7 @@ fn build_dir_records(
   let self_susp = if rr && d == 0 {
     rr_sp_er(rr_version)
   } else {
-    Bytes::new(0)
+    Bytes::make(0, b'\x00')
   }
   records.push(
     make_dir_record(
@@ -970,7 +970,7 @@ fn build_dir_records(
       size_of(parent_index),
       2,
       Bytes::from_array([b'\x01'][:]),
-      Bytes::new(0),
+      Bytes::make(0, b'\x00'),
     ),
   )
   // 子目录 + 文件，按名字升序
@@ -1014,7 +1014,7 @@ fn build_dir_records(
       let susp = if rr {
         rr_susp(dirs[index].name, 0o040755, None, rr_version)
       } else {
-        Bytes::new(0)
+        Bytes::make(0, b'\x00')
       }
       let rec = make_dir_record(extent_of(index), size_of(index), 2, name, susp)
       if rec.length() > 255 {
@@ -1037,7 +1037,7 @@ fn build_dir_records(
       let susp = if rr {
         rr_susp(files[index].name, mode, files[index].symlink, rr_version)
       } else {
-        Bytes::new(0)
+        Bytes::make(0, b'\x00')
       }
       let rec = make_dir_record(
         files[index].lba,
@@ -1221,7 +1221,7 @@ fn descriptor_base(
     if rr {
       rr_sp_er(rr_version)
     } else {
-      Bytes::new(0)
+      Bytes::make(0, b'\x00')
     },
   )
   for i = 0; i < root_record.length(); i = i + 1 {

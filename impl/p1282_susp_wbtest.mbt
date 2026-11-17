@@ -23,7 +23,7 @@ test "SL entry builds an absolute symlink target" {
   ]
   let area = bytes_of(susp_entry("SL", body))
   let info = RockRidge::empty()
-  parse_susp(Bytes::new(0), 2048, area, info, 0)
+  parse_susp(Bytes::make(0, b'\x00'), 2048, area, info, 0)
   assert_eq(info.symlink, Some("/Docs/link"))
 }
 
@@ -31,7 +31,13 @@ test "SL entry builds an absolute symlink target" {
 test "NM entry decodes an alternate name" {
   let body = [b'\x00', b'H', b'e', b'l', b'l', b'o', b'.', b't', b'x', b't']
   let info = RockRidge::empty()
-  parse_susp(Bytes::new(0), 2048, bytes_of(susp_entry("NM", body)), info, 0)
+  parse_susp(
+    Bytes::make(0, b'\x00'),
+    2048,
+    bytes_of(susp_entry("NM", body)),
+    info,
+    0,
+  )
   assert_eq(info.name, Some("Hello.txt"))
 }
 
@@ -39,7 +45,7 @@ test "NM entry decodes an alternate name" {
 test "RR and SP entries mark presence" {
   let info = RockRidge::empty()
   parse_susp(
-    Bytes::new(0),
+    Bytes::make(0, b'\x00'),
     2048,
     bytes_of(susp_entry("SP", [b'\xBE', b'\xEF', b'\x00'])),
     info,
@@ -55,6 +61,12 @@ test "PX entry carries the POSIX mode" {
     b'\xA4', b'\x81', b'\x00', b'\x00', b'\x00', b'\x00', b'\x81', b'\xA4',
   ]
   let info = RockRidge::empty()
-  parse_susp(Bytes::new(0), 2048, bytes_of(susp_entry("PX", body)), info, 0)
+  parse_susp(
+    Bytes::make(0, b'\x00'),
+    2048,
+    bytes_of(susp_entry("PX", body)),
+    info,
+    0,
+  )
   assert_eq(info.mode, Some(0x81A4))
 }

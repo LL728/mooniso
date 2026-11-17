@@ -17,7 +17,7 @@ fn robust_image(
       flags: 2,
       name: "",
       date: date_fixture(),
-      system_use: Bytes::new(0),
+      system_use: Bytes::make(0, b'\x00'),
       posix_mode: None,
       symlink_target: None,
     },

@@ -33,7 +33,7 @@ fn sub_bytes(data : Bytes, start : Int32, end : Int32) -> Bytes {
   let from = if start < 0 { 0 } else { start }
   let to = if end > data.length() { data.length() } else { end }
   if to <= from {
-    return Bytes::new(0)
+    return Bytes::make(0, b'\x00')
   }
   let n = to - from
   let out = FixedArray::make(n, b'\x00')

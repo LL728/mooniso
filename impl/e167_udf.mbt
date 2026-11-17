@@ -279,7 +279,7 @@ fn UdfImage::read_entry(
   let l_ad = read_le32(self.data, offset + 172)
   let flags = read_le16(self.data, offset + 34)
   let long_ad = (flags & 1) != 0
-  let mut embedded = Bytes::new(0)
+  let mut embedded = Bytes::make(0, b'\x00')
   let extents : Array[UdfExtent] = []
   let mut at = offset + 176 + l_ea
   let end = at + l_ad
