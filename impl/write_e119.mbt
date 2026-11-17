@@ -32,6 +32,8 @@ pub struct IsoBuilder {
   files : Array[(String, Bytes)]
   /// 符号链接：路径 -> 目标
   symlinks : Array[(String, String)]
+  /// 额外启动 section：(映像内路径, 加载扇区数, 平台号)，按顺序写在默认启动项之后
+  boot_sections : Array[(String, Int32, Int32)]
 }
 
 ///|
@@ -51,6 +53,7 @@ pub fn IsoBuilder::new() -> IsoBuilder {
     dirs: ["/"],
     files: [],
     symlinks: [],
+    boot_sections: [],
   }
 }
 
@@ -107,6 +110,20 @@ pub fn IsoBuilder::boot_image(
   self.boot_path = Some(normalize_path(path))
   self.boot_load_sectors = load_sectors
   self.boot_platform = platform
+}
+
+///|
+
+///|
+/// 追加一个 El Torito 启动 section（多启动入口）。路径须已用 add_file 加入。
+/// 写入时按顺序生成 section header：最后一个用 0x90，其余用 0x91。
+pub fn IsoBuilder::add_boot_section(
+  self : IsoBuilder,
+  path : String,
+  load_sectors : Int32,
+  platform : Int32,
+) -> Unit {
+  self.boot_sections.push((normalize_path(path), load_sectors, platform))
 }
 
 ///|
@@ -864,10 +881,26 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       Some(path) => Some((find_lba(path), self.boot_load_sectors))
       None => None
     }
-    write_at(
-      boot_catalog_lba,
-      boot_catalog_sector(bios, efi, self.boot_platform),
-    )
+    let sections : Array[(Int32, Int32, Int32)] = []
+    match bios {
+      Some(pair) => {
+        let (lba, sectors) = pair
+        sections.push((self.boot_platform, lba, sectors))
+      }
+      None => ()
+    }
+    match efi {
+      Some(pair) => {
+        let (lba, sectors) = pair
+        sections.push((0xEF, lba, sectors))
+      }
+      None => ()
+    }
+    for extra in self.boot_sections {
+      let (p, load_sectors, section_platform) = extra
+      sections.push((section_platform, find_lba(p), load_sectors))
+    }
+    write_at(boot_catalog_lba, boot_catalog_sector(sections))
     write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
     // boot info table：对 BIOS 启动映像打 56 字节补丁（偏移 8 起）
     if self.boot_info_table {

@@ -23,6 +23,7 @@
 | 记录长度为偶数（奇数名补 1 字节） | 9.1.12 | `impl/write_e119.mbt` `make_dir_record` | `builder produces an image the reader can open` | pycdlib、Windows 挂载 |
 | 记录时间戳（17 字节 7 字段） | 9.1.5 | `impl/e119_record.mbt` `RecordDate` | 经 `parses a file record` 断言 | pycdlib |
 | 多段文件（标志位 7，按段拼接） | 9.1.6 | `impl/tree.mbt` `read_file` | `list_dir merges multi-extent records`；`read_file concatenates extents in order` | pycdlib（`files.iso` 3 段） |
+| 路径表（L / M，层序 + 父目录序号） | 9.4 | `impl/e119_pathtable.mbt` + `impl/tree.mbt` `IsoImage::path_table` | `path table lists directories with extent, parent and level` | 与目录记录 extent 交叉校验（`validate`） |
 | 路径表 L / M（写入侧生成，按父目录号与名字排序） | 6.9 | `impl/write_e119.mbt` `path_table_bytes` | `builder produces an image the reader can open` | Windows 挂载（无法进子目录即失败） |
 | 目录记录按名字升序存放 | 9.3 | `impl/write_e119.mbt` `build_dir_records` | `directory records are stored in name order` | pycdlib |
 
@@ -110,6 +111,7 @@ CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐�
 | UDF 写入 | 职责边界：本库写入侧产出 ISO 9660 + Joliet + Rock Ridge，UDF 侧只提供读取 |
 | 元数据分区（UDF 2.50+）、VAT/虚拟分区、Sparable 分区、扩展文件条目 | 见上表：这些结构改变文件条目寻址，检测到即显式拒绝（`UnsupportedLayout`），不静默误读 |
 | 单个文件 > 4 GiB 的 UDF 读取 | ECMA-167 4/14.9 的 64 位信息长度：本实现按 32 位长度处理，高 32 位非零时返回 `UnsupportedLayout("udf-file-over-4gib")`，不截断 |
+| 单个文件 > 2 GiB 的 ISO 9660 读取 | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`；`read_range` 可分区间读取 |
 | 多段文件写入 | ECMA-119 9.1.6：读侧已合并多段，写侧不拆分 |
 | CL / PL 深层目录重定位（写入） | IEEE P1282 §4.1.8 / §4.1.9：写侧不搬移目录，>8 层路径由 Joliet / Rock Ridge 名字承载 |
 | 目录层级 > 8（ECMA-119 9.4） | 未实现 CL/PL 重定位，因此 `build()` 默认拒绝（`UnsupportedLayout("iso9660-directory-depth")`）；`allow_deep_paths(true)` 可显式放行 |

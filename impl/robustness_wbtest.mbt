@@ -24,6 +24,9 @@ fn robust_image(
     joliet_root: None,
     joliet_level: 0,
     rock_ridge: false,
+    path_table_l_lba: 0,
+    path_table_m_lba: 0,
+    path_table_size: 0,
   }
 }
 

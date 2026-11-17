@@ -17,4 +17,5 @@ pub using @impl {
   type RecordDate,
   type BootInfo,
   type BootEntry,
+  type PathTableEntry,
 }

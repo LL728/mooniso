@@ -15,6 +15,10 @@ pub struct IsoImage {
   joliet_level : Int32
   /// 映像是否带 Rock Ridge 扩展（优先于 Joliet 使用它的名字与属性）。
   rock_ridge : Bool
+  /// 路径表位置与长度：ECMA-119 9.4 的目录索引
+  path_table_l_lba : Int32
+  path_table_m_lba : Int32
+  path_table_size : Int32
 }
 
 ///|
@@ -56,6 +60,9 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
     },
     joliet_level,
     rock_ridge,
+    path_table_l_lba: pvd.path_table_l_lba,
+    path_table_m_lba: pvd.path_table_m_lba,
+    path_table_size: pvd.path_table_size,
   }
 }
 
@@ -503,6 +510,64 @@ pub struct ValidationReport {
 }
 
 ///|
+
+///|
+/// 读取路径表（ECMA-119 9.4）：优先 L 表（小端），L 表缺失时退回 M 表（大端）。
+/// 记录按层序排列，parent_index 是父目录在表内的序号（1 起），根目录为 1。
+pub fn IsoImage::path_table(
+  self : IsoImage,
+) -> Array[PathTableEntry] raise IsoError {
+  let mut big_endian = false
+  if self.path_table_l_lba <= 0 {
+    if self.path_table_m_lba <= 0 {
+      raise BadDescriptor(140)
+    }
+    big_endian = true
+  }
+  let lba = if big_endian {
+    self.path_table_m_lba
+  } else {
+    self.path_table_l_lba
+  }
+  let start = extent_offset(
+    lba,
+    self.path_table_size,
+    self.block_size,
+    self.data.length(),
+  )
+  let end = start + self.path_table_size
+  let levels : Array[Int32] = []
+  let out : Array[PathTableEntry] = []
+  let mut at = start
+  let mut number : Int32 = 1
+  while at + 8 <= end {
+    let len_di = self.data[at].to_uint().reinterpret_as_int()
+    if len_di == 0 {
+      break
+    }
+    let pad = if len_di % 2 == 1 { 1 } else { 0 }
+    if at + 8 + len_di + pad > end {
+      raise BadDescriptor(len_di)
+    }
+    let extent = path_table_u32(self.data, at + 2, big_endian)
+    let parent = path_table_u16(self.data, at + 6, big_endian)
+    let name = ascii_of(sub_bytes(self.data, at + 8, at + 8 + len_di))
+    let level = if number == 1 {
+      1
+    } else if parent >= 1 && parent < number {
+      levels[parent - 1] + 1
+    } else {
+      1
+    }
+    levels.push(level)
+    out.push(PathTableEntry::{ name, extent, parent_index: parent, level, })
+    at = at + 8 + len_di + pad
+    number = number + 1
+  }
+  out
+}
+
+///|
 /// 遍历整棵目录树做结构校验：记录能否解析、extent 是否越界、文件能否读完。
 /// 返回全部问题而不是遇错即停，方便一次性给出体检结论。
 pub fn IsoImage::validate(self : IsoImage) -> ValidationReport {
@@ -545,6 +610,66 @@ pub fn IsoImage::validate(self : IsoImage) -> ValidationReport {
         }
       }
     }
+  }
+  // 路径表交叉校验：它是目录树的扁平索引，必须与目录记录自洽（ECMA-119 9.4）
+  if self.path_table_l_lba > 0 && self.path_table_size > 0 {
+    let table : Array[PathTableEntry] = self.path_table() catch {
+      _ => {
+        let empty : Array[PathTableEntry] = []
+        empty
+      }
+    }
+    if table.length() == 0 {
+      problems.push("路径表无法解析或为空")
+    } else {
+      if table[0].extent != self.root.extent {
+        problems.push("路径表根目录 extent 与主卷描述符不一致")
+      }
+      let mut number : Int32 = 1
+      for entry in table {
+        if entry.level < 1 || entry.level > 8 {
+          problems.push("路径表目录层级越界: " + entry.name)
+        }
+        if number > 1 &&
+          (entry.parent_index < 1 || entry.parent_index >= number) {
+          problems.push("路径表父目录序号非法: " + entry.name)
+        }
+        let ok = try {
+          let offset = extent_offset(
+            entry.extent,
+            1,
+            self.block_size,
+            self.data.length(),
+          )
+          let reader = ByteReader::new(self.data)
+          reader.seek(offset)
+          let parsed = parse_directory_record(reader)
+          parsed.0.is_dir()
+        } catch {
+          _ => false
+        }
+        if !ok {
+          problems.push("路径表条目不指向目录: " + entry.name)
+        }
+        number = number + 1
+      }
+    }
+  }
+  // El Torito：只在映像确实带启动目录时校验；没有启动记录本身不是问题
+  let boot_lba = find_boot_catalog_lba(self.data) catch { _ => None }
+  match boot_lba {
+    Some(lba) => {
+      let boot_ok = try {
+        let _ = parse_boot_catalog(self.data, lba)
+        true
+      } catch {
+        _ => false
+      }
+      if !boot_ok {
+        problems.push("El Torito 启动目录校验失败")
+      }
+    }
+    None => ()
   }
   ValidationReport::{ directories, files, symlinks, total_bytes, problems, }
 }

@@ -19,6 +19,16 @@ fn boot_sector() -> Bytes {
   data[38] = b'\x04'
   data[39] = b'\x00'
   data[40] = b'\x1A'
+  // 校验项：32 字节里 16 个小端 16 位字之和必须为 0（El Torito 2.0），夹具也要满足
+  let mut header_sum = 0
+  for i = 0; i < 16; i = i + 1 {
+    let lo = data[i * 2].to_uint().reinterpret_as_int()
+    let hi = data[i * 2 + 1].to_uint().reinterpret_as_int()
+    header_sum = (header_sum + (lo | (hi << 8))) & 0xFFFF
+  }
+  let header_checksum = (0x10000 - header_sum) & 0xFFFF
+  data[28] = (header_checksum & 0xFF).to_byte()
+  data[29] = ((header_checksum >> 8) & 0xFF).to_byte()
   Bytes::from_array(data[:])
 }
 

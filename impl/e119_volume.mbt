@@ -13,6 +13,10 @@ pub struct PrimaryVolumeDescriptor {
   volume_space_size : Int32
   logical_block_size : Int32
   path_table_size : Int32
+  /// L 路径表起始逻辑块号（小端），0 表示映像没有路径表
+  path_table_l_lba : Int32
+  /// M 路径表起始逻辑块号（大端）
+  path_table_m_lba : Int32
   root : DirectoryRecord
 }
 
@@ -84,6 +88,10 @@ pub fn parse_primary_volume_descriptor(
   let _volume_sequence_number = r.read_u16_both()
   let logical_block_size = r.read_u16_both()
   let path_table_size = r.read_u32_both()
+  let path_table_l_lba = r.read_u32_le()
+  let _optional_l_lba = r.read_u32_le()
+  let path_table_m_lba = r.read_u32_be()
+  let _optional_m_lba = r.read_u32_be()
   if logical_block_size <= 0 || logical_block_size % SECTOR_SIZE != 0 {
     raise BadDescriptor(logical_block_size)
   }
@@ -95,6 +103,8 @@ pub fn parse_primary_volume_descriptor(
     volume_space_size,
     logical_block_size,
     path_table_size,
+    path_table_l_lba,
+    path_table_m_lba,
     root,
   }
 }

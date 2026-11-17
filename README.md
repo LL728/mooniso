@@ -8,10 +8,10 @@
 
 | 规范 | 读 | 写 | 独立判据 |
 |---|---|---|---|
-| ECMA-119（ISO 9660） | 卷描述符链、目录记录、多段文件、路径解析、文件读取 | 名字级别 1/2/3、目录记录、L/M 路径表、块分配 | pycdlib、Linux 内核 isofs、Windows CDFS |
+| ECMA-119（ISO 9660） | 卷描述符链、目录记录、多段文件、路径解析、文件读取、L/M 路径表 | 名字级别 1/2/3、目录记录、L/M 路径表、块分配 | pycdlib、Linux 内核 isofs、Windows CDFS |
 | Joliet | 补充卷描述符、UCS-2 名字（含代理对） | 完整目录树 + UCS-2 路径表 | pycdlib、Windows 挂载 |
 | IEEE P1282（SUSP / Rock Ridge） | SP / ER / RR / NM / PX / SL / CE | NM / PX / SL / TF，1.09 与 1.12 两版 | pycdlib |
-| El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动），可选 boot info table（`--boot-info-table`，供 syslinux/isolinux） | pycdlib、mkisofs 约定 |
+| El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动；支持多启动 section），可选 boot info table（`--boot-info-table`，供 syslinux/isolinux） | pycdlib、mkisofs 约定 |
 | ECMA-167（UDF） | **UDF 1.02 单分区**：Anchor → 描述符序列 → File Set → File Entry → FID | —（只读） | pycdlib 的 UDF 视角 |
 
 条款级的「实现文件 / 判别用例 / 判据」三列对照见 [docs/conformance.md](docs/conformance.md)。
@@ -120,6 +120,7 @@ python tools/demo/official.py          # 正式版
 | UDF 2.50 / 2.60 | 这两个版本的文件条目经**元数据分区**寻址（OSTA UDF 2.50 §2.3.10）：去掉该层无法定位 file entry，因此不声明兼容。检测到元数据分区映射即返回 `UnsupportedLayout("udf-metadata-partition")`，退出码 1 |
 | UDF 的 VAT（虚拟分区）、Sparable 分区、扩展文件条目（tag 266） | 多区段写入、可重写介质备用块、UDF 2.00+ 的更长文件条目头；三者都会改变寻址，检测到即返回 `UnsupportedLayout`，不按普通分区猜读 |
 | 单个文件 > 4 GiB | ECMA-167 4/14.9 的 64 位信息长度；本实现按 32 位处理，高 32 位非零时返回 `UnsupportedLayout("udf-file-over-4gib")`，不截断 |
+| 单个文件 > 2 GiB（ISO 9660） | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`（`read_range` 仍可分区间读取） |
 | 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9。ECMA-119 9.4 规定目录层级上限 8：超过时 `build()` 直接报 `UnsupportedLayout("iso9660-directory-depth")`，不产出表面可读、实则不合规的映像；确需深层路径时用 `allow_deep_paths(true)` 显式放行 |
 | 提取时还原符号链接 | 纯 MoonBit 无 FFI 时宿主无创建符号链接的 API（`moonbitlang/x/fs` 未提供）；`extract-all` 报告被跳过的链接数量，需要链接语义时挂载后用系统工具复制 |
 | zisofs、HFS / HFS+ 混合、FFI 绑定 | 不在 ISO 9660 本体与本项目声明的范围 |
