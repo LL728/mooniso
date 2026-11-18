@@ -106,8 +106,13 @@ pub fn parse_boot_catalog(
   let catalog_end = catalog_lba * SECTOR_SIZE + 16 * SECTOR_SIZE
   while cursor + 32 <= catalog_end && cursor + 32 <= data.length() {
     let header = data[cursor].to_uint().reinterpret_as_int()
-    if header != 0x90 && header != 0x91 {
+    if header == 0 {
+      // 0 是启动目录之后的填充：正常收尾
       break
+    }
+    if header != 0x90 && header != 0x91 {
+      // 既不是结束填充也不是合法 section 头：结构异常，不能静默截断启动项
+      raise BadDescriptor(header)
     }
     // 每个 section 头也是 32 字节校验项，16 个小端字之和必须为 0
     let mut section_sum = 0

@@ -420,7 +420,9 @@ pub fn IsoImage::read_range(
     raise Truncated
   }
   let want = if length == 0 { total - offset } else { length }
-  if offset + want > total {
+  // 全程 64 位：offset + want 在 32 位下会回绕为负，回绕后判据恒假，
+  // 随后按 want 申请巨型缓冲区；这里必须用 Int64 比较
+  if offset.to_int64() + want.to_int64() > total64 {
     raise Truncated
   }
   let out = FixedArray::make(want, b'\x00')
@@ -519,21 +521,14 @@ pub struct ValidationReport {
 ///|
 /// 读取路径表（ECMA-119 9.4）：优先 L 表（小端），L 表缺失时退回 M 表（大端）。
 /// 记录按层序排列，parent_index 是父目录在表内的序号（1 起），根目录为 1。
-pub fn IsoImage::path_table(
+
+///|
+/// 按给定表位置与字节序解析路径表（L 表小端，M 表大端）。
+fn IsoImage::path_table_at(
   self : IsoImage,
+  lba : Int32,
+  big_endian : Bool,
 ) -> Array[PathTableEntry] raise IsoError {
-  let mut big_endian = false
-  if self.path_table_l_lba <= 0 {
-    if self.path_table_m_lba <= 0 {
-      raise BadDescriptor(140)
-    }
-    big_endian = true
-  }
-  let lba = if big_endian {
-    self.path_table_m_lba
-  } else {
-    self.path_table_l_lba
-  }
   let start = extent_offset(
     lba,
     self.path_table_size,
@@ -570,6 +565,20 @@ pub fn IsoImage::path_table(
     number = number + 1
   }
   out
+}
+
+///|
+/// 读取路径表（ECMA-119 9.4）：优先 L 表（小端），L 表缺失时退回 M 表（大端）。
+pub fn IsoImage::path_table(
+  self : IsoImage,
+) -> Array[PathTableEntry] raise IsoError {
+  if self.path_table_l_lba > 0 {
+    return self.path_table_at(self.path_table_l_lba, false)
+  }
+  if self.path_table_m_lba > 0 {
+    return self.path_table_at(self.path_table_m_lba, true)
+  }
+  raise BadDescriptor(140)
 }
 
 ///|
@@ -657,6 +666,41 @@ pub fn IsoImage::validate(self : IsoImage) -> ValidationReport {
           problems.push("路径表条目不指向目录: " + entry.name)
         }
         number = number + 1
+      }
+    }
+  }
+  // L / M 两份路径表只字节序不同，内容必须一致（ECMA-119 9.4）
+  if self.path_table_l_lba > 0 &&
+    self.path_table_m_lba > 0 &&
+    self.path_table_size > 0 {
+    let l_table : Array[PathTableEntry] = self.path_table_at(
+      self.path_table_l_lba,
+      false,
+    ) catch {
+      _ => {
+        let empty : Array[PathTableEntry] = []
+        empty
+      }
+    }
+    let m_table : Array[PathTableEntry] = self.path_table_at(
+      self.path_table_m_lba,
+      true,
+    ) catch {
+      _ => {
+        let empty : Array[PathTableEntry] = []
+        empty
+      }
+    }
+    if l_table.length() != m_table.length() {
+      problems.push("L / M 路径表条目数不一致")
+    } else {
+      for k = 0; k < l_table.length(); k = k + 1 {
+        if l_table[k].extent != m_table[k].extent ||
+          l_table[k].parent_index != m_table[k].parent_index ||
+          l_table[k].name != m_table[k].name {
+          problems.push("L / M 路径表内容不一致: " + l_table[k].name)
+          break
+        }
       }
     }
   }

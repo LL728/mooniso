@@ -24,6 +24,8 @@
 | 记录时间戳（17 字节 7 字段） | 9.1.5 | `impl/e119_record.mbt` `RecordDate` | 经 `parses a file record` 断言 | pycdlib |
 | 多段文件（标志位 7，按段拼接） | 9.1.6 | `impl/tree.mbt` `read_file` | `list_dir merges multi-extent records`；`read_file concatenates extents in order` | pycdlib（`files.iso` 3 段） |
 | 路径表（L / M，层序 + 父目录序号） | 9.4 | `impl/e119_pathtable.mbt` + `impl/tree.mbt` `IsoImage::path_table` | `path table lists directories with extent, parent and level` | 与目录记录 extent 交叉校验（`validate`） |
+| L / M 路径表一致性 | 9.4 | `impl/tree.mbt` `validate` | `validate reports L and M path tables that disagree` | pycdlib 生成的映像两表一致 |
+| 启动目录里的未知 section 头 | El Torito 2.0 | `impl/eltorito.mbt` `parse_boot_catalog` | `reader rejects an unknown boot catalog header instead of stopping silently` | 读到非 0 填充、非 0x90/0x91 即报错，不静默截断 |
 | 路径表 L / M（写入侧生成，按父目录号与名字排序） | 6.9 | `impl/write_e119.mbt` `path_table_bytes` | `builder produces an image the reader can open` | Windows 挂载（无法进子目录即失败） |
 | 目录记录按名字升序存放 | 9.3 | `impl/write_e119.mbt` `build_dir_records` | `directory records are stored in name order` | pycdlib |
 
