@@ -280,3 +280,36 @@ test "boot info table is off by default and leaves offset 8 untouched" {
   assert_eq(img[off + 8].to_uint().reinterpret_as_int(), 0)
   assert_eq(img[off + 0].to_uint().reinterpret_as_int(), 0xAA)
 }
+
+///|
+/// boot info table 必须用启动映像的真实字节长度，且校验和覆盖整幅映像
+/// （isolinux.bin 通常 24-40 KB，若按单扇区写 bi_length 与校验和，真实引导器会判表无效）。
+test "boot info table uses the real boot image length and covers the whole image" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("BIT2")
+  let boot = FixedArray::make(4096, (0).to_byte())
+  boot[0] = (1).to_byte()
+  boot[2048] = (2).to_byte()
+  builder.add_file("/boot.bin", Bytes::from_array(boot[:]))
+  builder.boot_image("/boot.bin", 4, 0)
+  builder.boot_info_table(true)
+  let img = builder.build()
+  let image = IsoImage::open(img)
+  let rec = image.find_record("/boot.bin")
+  let off = rec.extent * 2048
+  assert_eq(le32_at(img, off + 16), 4096)
+  let uword = fn(o : Int32) -> Int64 {
+    let b0 = img[o].to_uint().reinterpret_as_int().to_int64()
+    let b1 = img[o + 1].to_uint().reinterpret_as_int().to_int64()
+    let b2 = img[o + 2].to_uint().reinterpret_as_int().to_int64()
+    let b3 = img[o + 3].to_uint().reinterpret_as_int().to_int64()
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+  }
+  let mut sum : Int64 = 0
+  let mut i = 0
+  while i < 4096 {
+    sum = sum + uword(off + i)
+    i = i + 4
+  }
+  assert_eq((sum % 0x100000000L).to_int(), 0)
+}

@@ -904,12 +904,27 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
     write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
     // boot info table：对 BIOS 启动映像打 56 字节补丁（偏移 8 起）
     if self.boot_info_table {
-      let boot_lba = match self.boot_path {
-        Some(path) => find_lba(path)
+      // 取启动映像在文件表里的真实字节长度：isolinux.bin 通常 24-40 KB，
+      // 若按单扇区写 bi_length 与校验和，真实引导器会判 boot info table 无效
+      let boot_index = match self.boot_path {
+        Some(path) => {
+          let mut found = -1
+          for f = 0; f < files.length(); f = f + 1 {
+            if files[f].path == path {
+              found = f
+            }
+          }
+          found
+        }
         None => -1
       }
-      if boot_lba >= 0 {
-        patch_boot_info_table(image, boot_lba, sector)
+      if boot_index >= 0 {
+        patch_boot_info_table(
+          image,
+          files[boot_index].lba,
+          sector,
+          files[boot_index].size,
+        )
       }
     }
   }
@@ -1348,10 +1363,20 @@ fn terminator_sector() -> Bytes {
 ///   bi_pvd@8（PVD LBA=16）、bi_file@12（启动文件 LBA）、bi_length@16（字节长度）、
 ///   bi_csum@20（让整个启动映像按 4 字节小端字求和为 0；校验字段自身按 0 计）。
 /// 总长 56 字节（偏移 8..64），超出部分不覆盖，避免破坏引导代码。
+
+///|
+/// 在启动映像偏移 8 写 boot info table（syslinux/isolinux 约定）：
+///   bi_pvd@8（PVD LBA=16）、bi_file@12（启动文件 LBA）、
+///   bi_length@16（启动映像真实字节长度）、bi_csum@20（让整幅启动映像按 4 字节小端字求和为 0，
+///   校验字段自身按 0 计）。总长 56 字节（偏移 8..64）。
+///
+/// boot_length 必须是启动映像的真实字节长度：isolinux.bin 通常 24-40 KB，
+/// 若按单扇区写 bi_length 与校验和，真实引导器会判该表无效。
 fn patch_boot_info_table(
   image : FixedArray[Byte],
   boot_lba : Int32,
   sector : Int32,
+  boot_length : Int32,
 ) -> Unit {
   let base = boot_lba * sector
   // 全部按无符号 64 位读写，避免 Int32 在高位字节上符号扩展
@@ -1361,20 +1386,27 @@ fn patch_boot_info_table(
     image[base + off + 2] = ((value >> 16) & 0xFF).to_int().to_byte()
     image[base + off + 3] = ((value >> 24) & 0xFF).to_int().to_byte()
   }
+  // 只取 boot_length 内的字节，超出部分按 0 补齐（尾词不足 4 字节时）
+  let byte_at = fn(off : Int32) -> Int64 {
+    if off < boot_length {
+      image[base + off].to_uint().reinterpret_as_int().to_int64()
+    } else {
+      0L
+    }
+  }
   let word_at = fn(off : Int32) -> Int64 {
-    let b0 = image[base + off].to_uint().reinterpret_as_int().to_int64()
-    let b1 = image[base + off + 1].to_uint().reinterpret_as_int().to_int64()
-    let b2 = image[base + off + 2].to_uint().reinterpret_as_int().to_int64()
-    let b3 = image[base + off + 3].to_uint().reinterpret_as_int().to_int64()
-    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    byte_at(off) |
+    (byte_at(off + 1) << 8) |
+    (byte_at(off + 2) << 16) |
+    (byte_at(off + 3) << 24)
   }
   write_le32(8, 16L) // bi_pvd：主卷描述符固定在第 16 块
   write_le32(12, boot_lba.to_int64()) // bi_file
-  write_le32(16, sector.to_int64()) // bi_length：启动映像至少一扇区
-  // bi_csum=0 参与求和，累加全部 4 字节小端字，回填使 32 位无符号总和为 0
+  write_le32(16, boot_length.to_int64()) // bi_length：真实字节长度
+  // bi_csum=0 参与求和，累加整幅启动映像的 4 字节小端字，回填使 32 位无符号总和为 0
   let mut sum : Int64 = 0
   let mut i = 0
-  while i < sector {
+  while i < boot_length {
     if i != 20 {
       sum = sum + word_at(i)
     }
