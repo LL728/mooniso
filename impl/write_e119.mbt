@@ -900,7 +900,8 @@ pub fn IsoBuilder::build(self : IsoBuilder) -> Bytes raise IsoError {
       let (p, load_sectors, section_platform) = extra
       sections.push((section_platform, find_lba(p), load_sectors))
     }
-    write_at(boot_catalog_lba, boot_catalog_sector(sections))
+    let catalog_bytes = boot_catalog_sector(sections)
+    write_at(boot_catalog_lba, catalog_bytes)
     write_at(boot_record_lba, boot_record_sector(boot_catalog_lba))
     // boot info table：对 BIOS 启动映像打 56 字节补丁（偏移 8 起）
     if self.boot_info_table {

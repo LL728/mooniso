@@ -37,9 +37,14 @@ pub fn IsoImage::open(data : Bytes) -> IsoImage raise IsoError {
   }
   let pvd = parse_primary_volume_descriptor(data, pvd_lba)
   // 声明容量必须落在实际数据范围内，避免后续按越界 extent 读取
-  if pvd.root.extent < 0 ||
-    (pvd.root.extent.to_int64() + 1).to_int() * pvd.logical_block_size >
-    data.length() {
+  if pvd.root.extent < 0 {
+    raise Truncated
+  }
+  // 全程 64 位：extent * 块大小在 32 位下会回绕，回绕后仍可能落在映像范围内，
+  // 从而绕过这道「声明容量必须落在实际数据范围内」的检查
+  let root_end = (pvd.root.extent.to_int64() + 1L) *
+    pvd.logical_block_size.to_int64()
+  if root_end > data.length().to_int64() {
     raise Truncated
   }
   let joliet = find_joliet_descriptor(data)

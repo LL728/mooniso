@@ -180,7 +180,13 @@ fn boot_record_sector(catalog_lba : Int32) -> Bytes {
 
 ///|
 /// El Torito 启动目录：校验项（含校验和）+ 默认启动项。
-fn boot_catalog_sector(sections : Array[(Int32, Int32, Int32)]) -> Bytes {
+fn boot_catalog_sector(
+  sections : Array[(Int32, Int32, Int32)],
+) -> Bytes raise IsoError {
+  // 启动目录固定写一扇区：默认启动项 32 字节 + 每附加段 64 字节，2048 字节最多 32 段
+  if sections.length() > 32 {
+    raise UnsupportedLayout("el-torito-too-many-sections")
+  }
   let sector = FixedArray::make(SECTOR_SIZE, (0).to_byte())
   sector[0] = (1).to_byte()
   let mut header_platform = 0xEF

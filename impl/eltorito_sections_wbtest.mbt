@@ -44,3 +44,24 @@ test "reader rejects a boot catalog with a broken validation checksum" {
   }
   assert_true(failed)
 }
+
+///|
+test "writer refuses more boot sections than one catalog sector holds" {
+  let builder = IsoBuilder::new()
+  builder.volume_id("MANY")
+  builder.add_file("/boot.bin", Bytes::make(2048, (0).to_byte()))
+  builder.boot_image("/boot.bin", 4, 0)
+  for i = 0; i < 32; i = i + 1 {
+    let name = "/s" + i.to_string() + ".bin"
+    builder.add_file(name, Bytes::make(512, (0).to_byte()))
+    builder.add_boot_section(name, 1, 0xEF)
+  }
+  let reason = try {
+    let _ = builder.build()
+    "built"
+  } catch {
+    UnsupportedLayout(name) => name
+    _ => "other-error"
+  }
+  assert_eq(reason, "el-torito-too-many-sections")
+}

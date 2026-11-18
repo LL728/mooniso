@@ -97,3 +97,34 @@ test "reading past a truncated image is rejected" {
   }
   assert_true(failed)
 }
+
+///|
+fn patch_bytes(data : Bytes, offset : Int32, values : Array[Int32]) -> Bytes {
+  let out = FixedArray::make(data.length(), (0).to_byte())
+  for i = 0; i < data.length(); i = i + 1 {
+    out[i] = data[i]
+  }
+  for i = 0; i < values.length(); i = i + 1 {
+    out[offset + i] = values[i].to_byte()
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
+/// 根目录 extent 在 32 位乘法下会回绕：回绕后仍可能落在映像内，
+/// 从而绕过「声明容量必须落在实际数据范围内」这道守卫。
+test "root extent that overflows 32 bit block math is rejected" {
+  let full = good_image()
+  // PVD 偏移 156 是根目录记录；extent 是 both-endian 32 位，位于记录偏移 2..10
+  let at = 16 * 2048 + 156 + 2
+  // 0x7FFFFFFF：小端 FF FF FF 7F，大端 7F FF FF FF
+  let broken = patch_bytes(full, at, [255, 255, 255, 127, 127, 255, 255, 255])
+  let failed = try {
+    let _ = IsoImage::open(broken)
+    false
+  } catch {
+    Truncated => true
+    _ => false
+  }
+  assert_true(failed)
+}

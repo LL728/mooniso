@@ -112,6 +112,7 @@ CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐�
 | 元数据分区（UDF 2.50+）、VAT/虚拟分区、Sparable 分区、扩展文件条目 | 见上表：这些结构改变文件条目寻址，检测到即显式拒绝（`UnsupportedLayout`），不静默误读 |
 | 单个文件 > 4 GiB 的 UDF 读取 | ECMA-167 4/14.9 的 64 位信息长度：本实现按 32 位长度处理，高 32 位非零时返回 `UnsupportedLayout("udf-file-over-4gib")`，不截断 |
 | 单个文件 > 2 GiB 的 ISO 9660 读取 | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`；`read_range` 可分区间读取 |
+| 启动 section 数量上限 | 启动目录固定一扇区：默认启动项 32 字节 + 每附加段 64 字节，上限 32 段，超出返回 `UnsupportedLayout("el-torito-too-many-sections")` |
 | 多段文件写入 | ECMA-119 9.1.6：读侧已合并多段，写侧不拆分 |
 | CL / PL 深层目录重定位（写入） | IEEE P1282 §4.1.8 / §4.1.9：写侧不搬移目录，>8 层路径由 Joliet / Rock Ridge 名字承载 |
 | 目录层级 > 8（ECMA-119 9.4） | 未实现 CL/PL 重定位，因此 `build()` 默认拒绝（`UnsupportedLayout("iso9660-directory-depth")`）；`allow_deep_paths(true)` 可显式放行 |
