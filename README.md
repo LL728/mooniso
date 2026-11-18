@@ -134,10 +134,11 @@ python tools/demo/official.py          # 正式版
 
 ## 版本
 
-仓库与 mooncakes 均为 `0.4.0`（2026-11-12 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
+仓库与 mooncakes 均为 `0.5.0`（2026-11-12 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
 以及 5 项健壮性修复（32 位偏移回绕、按声明长度分配、目录环、写入侧缓冲区、超长记录）。
 0.3.1 相对 0.3.0 只改文档与演示资源：演示视频按 57 个单测重录、旁白 wav 不再入库（发布包因此从 3.13 MB 降到 1.41 MB）、README 单测数同步；接口无变化。
 0.3.2 相对 0.3.1 只同步文档文本（包体积差改为实测 3.13 MB 到 1.41 MB、UDF 版本声明的「结构集」口径），代码零改动。
+0.5.0 相对 0.4.0：UDF 单文件 >4 GiB 改为显式 `UnsupportedLayout`；读侧解析 L/M 路径表并在 `validate` 交叉校验；读侧验证 El Torito 校验项与 section 头校验和；写侧支持多启动 section（`IsoBuilder::add_boot_section`，`0x91` 续接 / `0x90` 收尾）与启动目录跨扇区解析；boot info table 改用启动映像真实字节长度；启动 section 超过 32 段显式拒绝；根目录 extent 守卫改全程 64 位。
 0.4.0 相对 0.3.3 新增两项功能：`IsoImage::read_range`（区间读取，length=0 读到结尾）与 `IsoBuilder::boot_info_table` / CLI `--boot-info-table`（给 BIOS 启动映像写 syslinux/isolinux 引导参数表）；并修 create 参数解析在无值 flag 排末尾时被跳过的缺陷。
 0.3.3 相对 0.3.2 只清理本机路径：演示脚本的 ffmpeg/字体路径改为环境变量与 PATH 回退，旁白 manifest 只存文件名；代码零改动。
 
