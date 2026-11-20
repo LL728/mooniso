@@ -276,3 +276,57 @@ test "udf treats a terminal entry as an empty file" {
   let image = UdfImage::open(Bytes::from_array(buf[:]))
   assert_eq(image.file_size("/F.BIN"), 0L)
 }
+
+///|
+/// 分配描述符延续若指回自身，必须报错而不是无限递归。
+test "udf rejects a self-referencing allocation extent chain" {
+  let buf = udf_fixture()
+  put_le32(buf, 330 * 2048 + 176, (3 << 30) | 8)
+  put_le32(buf, 330 * 2048 + 180, 333)
+  put_tag(buf, 333 * 2048, 258)
+  put_le32(buf, 333 * 2048 + 20, 8)
+  // 延续描述符又指回 333 自己
+  put_le32(buf, 333 * 2048 + 24, (3 << 30) | 8)
+  put_le32(buf, 333 * 2048 + 28, 333)
+  let image = UdfImage::open(Bytes::from_array(buf[:]))
+  let failed = try {
+    let _ = image.read_file("/F.BIN")
+    false
+  } catch {
+    BadDescriptor(_) => true
+    _ => false
+  }
+  assert_true(failed)
+}
+
+///|
+/// 声明长度大于分配描述符覆盖范围时，不能静默补 0 当作数据。
+test "udf read_range rejects a range the extents do not cover" {
+  let buf = udf_fixture()
+  put_le64(buf, 330 * 2048 + 56, 16L) // 声明 16 字节，但只分配了 8 字节
+  let image = UdfImage::open(Bytes::from_array(buf[:]))
+  assert_eq(image.file_size("/F.BIN"), 16L)
+  let failed = try {
+    let _ = image.read_range("/F.BIN", 0L, 16)
+    false
+  } catch {
+    Truncated => true
+    _ => false
+  }
+  assert_true(failed)
+}
+
+///|
+/// UDF 逻辑块固定 2048：声明其它块大小的映像不是 1.02 布局，必须显式拒绝。
+test "udf rejects a volume that declares a non 2048 block size" {
+  let buf = udf_fixture()
+  put_le32(buf, 302 * 2048 + 212, 4096)
+  let reason = try {
+    let _ = UdfImage::open(Bytes::from_array(buf[:]))
+    "opened"
+  } catch {
+    UnsupportedLayout(name) => name
+    _ => "other"
+  }
+  assert_eq(reason, "udf-block-size")
+}

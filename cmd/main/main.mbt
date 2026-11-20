@@ -460,9 +460,16 @@ fn run_cli(args : Array[String]) -> Int32 {
       } else {
         None
       }
-      let bytes = match (offset, length) {
-        (Some(off), Some(len)) => udf_image.read_range(path, off, len)
-        _ => udf_image.read_file(path)
+      // 只给 offset 时 length 取 0，表示读到文件末尾
+      let bytes = match offset {
+        Some(off) => {
+          let len = match length {
+            Some(l) => l
+            None => 0
+          }
+          udf_image.read_range(path, off, len)
+        }
+        None => udf_image.read_file(path)
       }
       println(@utf8.decode_lossy(bytes))
       return 0

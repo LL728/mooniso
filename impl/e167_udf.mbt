@@ -229,6 +229,10 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
   if partition_start < 0 {
     raise BadDescriptor(partition_start)
   }
+  // UDF 卷的逻辑块固定 2048；其它值说明不是 UDF 1.02 的布局，拒绝而不是按错位读
+  if block_size != 2048 {
+    raise UnsupportedLayout("udf-block-size")
+  }
   let fsd = match file_set {
     Some(extent) => extent
     None => raise BadDescriptor(0)
@@ -316,6 +320,24 @@ fn UdfImage::collect_extents(
   long_ad : Bool,
   out : Array[UdfExtent],
 ) -> Unit raise IsoError {
+  self.collect_extents_at(start, end, step, default_partition, long_ad, out, 0)
+}
+
+///|
+/// 递归主体：depth 上限防止自引用 / 长链导致的无限递归（ECMA-167 未限制链长，实现必须自己设界）。
+fn UdfImage::collect_extents_at(
+  self : UdfImage,
+  start : Int32,
+  end : Int32,
+  step : Int32,
+  default_partition : Int32,
+  long_ad : Bool,
+  out : Array[UdfExtent],
+  depth : Int32,
+) -> Unit raise IsoError {
+  if depth > 8 {
+    raise BadDescriptor(258)
+  }
   let mut at = start
   while at + step <= end {
     let word = read_le32(self.data, at)
@@ -342,13 +364,14 @@ fn UdfImage::collect_extents(
         raise BadDescriptor(t.id)
       }
       let ad_len = read_le32(self.data, aed + 20)
-      self.collect_extents(
+      self.collect_extents_at(
         aed + 24,
         aed + 24 + ad_len,
         step,
         partition,
         long_ad,
         out,
+        depth + 1,
       )
     }
     at = at + step
@@ -574,6 +597,10 @@ pub fn UdfImage::read_range(
       written = written + n
     }
     seg_start = seg_end
+  }
+  // 分配描述符必须覆盖请求区间：覆盖不足说明映像结构异常，不能静默补 0 当成数据返回
+  if written < want {
+    raise Truncated
   }
   Bytes::from_array(out[:])
 }
