@@ -136,10 +136,11 @@ python tools/demo/official.py          # 正式版
 
 ## 版本
 
-仓库与 mooncakes 均为 `0.6.0`（2026-11-20 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
+仓库与 mooncakes 均为 `0.6.1`（2026-11-20 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
 以及 5 项健壮性修复（32 位偏移回绕、按声明长度分配、目录环、写入侧缓冲区、超长记录）。
 0.3.1 相对 0.3.0 只改文档与演示资源：演示视频按 57 个单测重录、旁白 wav 不再入库（发布包因此从 3.13 MB 降到 1.41 MB）、README 单测数同步；接口无变化。
 0.3.2 相对 0.3.1 只同步文档文本（包体积差改为实测 3.13 MB 到 1.41 MB、UDF 版本声明的「结构集」口径），代码零改动。
+0.6.1 相对 0.6.0：仅文档修正 —— README 最小示例改为可编译形态（`add_file` 传 `Bytes`、插值改用转义写法、补 `@utf8` import 说明），新增 `examples/readme_demo` 可运行等价示例；单测数同步为 80（含 15 条负例），0.6.0 发布日期更正为 2026-11-20。代码零改动。
 0.6.0 相对 0.5.1：UDF 读取补齐到完整 1.02 —— 64 位文件长度（不再排除 >4 GiB）、间接条目（259）、终止条目（260）、分配扩展描述符（258，修正 extent type 3 的语义）、逻辑块大小守卫；新增 `UdfImage::file_size` 返回 `Int64` 与 `read_range(offset: Int64, length)` 分块读取大文件，`read_file` 整文件物化超 2 GiB−1 时抛 `PayloadTooLarge`；`udf-cat` 支持可选 `[offset] [length]`；修分配描述符延续无环检测导致的栈溢出与覆盖不足时静默补 0。
 0.5.1 相对 0.5.0：区间读取（`read_range`）的越界判断改为全程 64 位比较，堵住 `offset + 超大 length` 的 32 位回绕；启动目录里出现非 0x90/0x91 的未知 section 头时显式报错，不再静默截断启动项；`validate` 同时解析并逐条比对 L / M 两份路径表，不一致即报出（此前 M 表只在 L 表缺失时才被读）。
 0.5.0 相对 0.4.0：UDF 单文件 >4 GiB 改为显式 `UnsupportedLayout`；读侧解析 L/M 路径表并在 `validate` 交叉校验；读侧验证 El Torito 校验项与 section 头校验和；写侧支持多启动 section（`IsoBuilder::add_boot_section`，`0x91` 续接 / `0x90` 收尾）与启动目录跨扇区解析；boot info table 改用启动映像真实字节长度；启动 section 超过 32 段显式拒绝；根目录 extent 守卫改全程 64 位。
