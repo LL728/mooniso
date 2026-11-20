@@ -23,11 +23,11 @@ moon add LL728/mooniso
 ```
 
 ```moonbit
-// 读一张映像
+// 读一张映像（bytes 由调用方提供，例如 @fs.read_file_to_bytes(path)）
 let image = @mooniso.IsoImage::open(bytes)
 println(image.volume_id())                 // 卷标
 for entry in image.walk("/") {             // 递归列树
-  println("{entry.path}\t{entry.size}")
+  println("\{entry.path}\t\{entry.size}")
 }
 let data = image.read_file("/HELLO.TXT")   // 取内容（多段、跨扇区、越界拒绝）
 
@@ -37,10 +37,12 @@ let head = image.read_range("/BIG.BIN", 0, 4096)
 // 造一张映像
 let builder = @mooniso.IsoBuilder::new()
 builder.add_directory("/Docs")
-builder.add_file("/Docs/note.md", text)
+builder.add_file("/Docs/note.md", @utf8.encode("# note"))  // 内容需为 Bytes
 builder.add_symlink("/link.txt", "/Docs/note.md")
 let image_bytes = builder.build()           // -> Bytes
 ```
+
+（`@utf8` 来自 `moonbitlang/core/encoding/utf8`，需在 `moon.pkg` 中 import；上例的可编译等价版本见 `examples/readme_demo`。）
 
 仓库内可直接跑的示例（造映像 → 读回 → 列树 → 结构体检）：
 
@@ -79,7 +81,7 @@ moon run cmd/main -- create out.iso ./rootfs --boot /boot.bin --efi /efi.img --l
 
 四类互不相同的判据，任何一类失败都会让 CI 变红：
 
-1. **单元测试 57 个**，wasm-gc 与 js 双后端各 57/57。其中 5 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent），确保"读坏了会报错"而不是"读出错数据"。
+1. **单元测试 80 个**，wasm-gc 与 js 双后端各 80/80。其中 15 条是负例（截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent、32 位回绕、目录环、分配覆盖不足、超 4 GiB 长度等），确保"读坏了会报错"而不是"读出错数据"。
 2. **与 pycdlib 对拍**：读取侧对 Joliet / Rock Ridge / El Torito / UDF 共 6 个目录逐条比对名字、类型、大小；写入侧把生成的映像交回 pycdlib 读，比对目录树、启动项、UEFI 分节、符号链接目标。
 3. **内核挂载**：CI 里用 Linux iso9660 驱动挂载我们自己生成的映像，按内容逐字节比对——驱动不认识我们的代码，只认识规范。
 4. **可复现性**：仓库内测试映像由 `tools/fixtures/build_corpus.py` 按规范构造，CI 每次重建并 `git diff --exit-code`，期望输出与代码行为不允许脱钩。
@@ -134,7 +136,7 @@ python tools/demo/official.py          # 正式版
 
 ## 版本
 
-仓库与 mooncakes 均为 `0.6.0`（2026-11-12 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
+仓库与 mooncakes 均为 `0.6.0`（2026-11-20 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
 以及 5 项健壮性修复（32 位偏移回绕、按声明长度分配、目录环、写入侧缓冲区、超长记录）。
 0.3.1 相对 0.3.0 只改文档与演示资源：演示视频按 57 个单测重录、旁白 wav 不再入库（发布包因此从 3.13 MB 降到 1.41 MB）、README 单测数同步；接口无变化。
 0.3.2 相对 0.3.1 只同步文档文本（包体积差改为实测 3.13 MB 到 1.41 MB、UDF 版本声明的「结构集」口径），代码零改动。
