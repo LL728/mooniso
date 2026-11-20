@@ -93,17 +93,13 @@ fn read_le32(data : Bytes, offset : Int32) -> Int32 {
 ///|
 
 ///|
-/// UDF 的信息长度是 64 位（ECMA-167 4/14.9）；本库只实现低 32 位。
-/// 高 32 位非零（单文件 > 4 GiB）时显式拒绝：若返回 -1，这个负数会流进
-/// UdfNode.size / UdfEntry.size，调用方会把 -1 当成合法长度（udf-ls 会打印 size=-1），
-/// 与 README / conformance 声明的「超出报错不截断」冲突。
-fn read_length64(data : Bytes, offset : Int32) -> Int32 raise IsoError {
-  let hi = read_le32(data, offset + 4)
-  let lo = read_le32(data, offset)
-  if hi != 0 {
-    raise UnsupportedLayout("udf-file-over-4gib")
-  }
-  lo
+/// UDF 的信息长度是 64 位（ECMA-167 4/14.9）。按原样返回 Int64：
+/// UDF 1.02 允许单文件超过 4 GiB（由 64 位长度表示），读取侧不得因长度高位非零而拒绝；
+/// 是否物化成单个 Bytes 由调用方按平台上限决定（Bytes 索引是 32 位）。
+fn read_length64(data : Bytes, offset : Int32) -> Int64 {
+  let hi = read_le32(data, offset + 4).to_int64() & 0xFFFFFFFFL
+  let lo = read_le32(data, offset).to_int64() & 0xFFFFFFFFL
+  (hi << 32) | lo
 }
 
 ///|
@@ -143,15 +139,15 @@ fn read_long_ad(data : Bytes, offset : Int32) -> UdfExtent {
 pub struct UdfEntry {
   name : String
   is_dir : Bool
-  size : Int32
+  /// 64 位信息长度：UDF 1.02 允许单文件超过 4 GiB
+  size : Int64
 }
 
 ///|
 /// 一个已解析的 UDF 文件/目录（内部表示）。
 priv struct UdfNode {
   is_dir : Bool
-  size : Int32
-  embedded : Bytes
+  size : Int64
   extents : Array[UdfExtent]
 }
 
@@ -257,6 +253,12 @@ pub fn UdfImage::block_size(self : UdfImage) -> Int32 {
 
 ///|
 /// 读取 File Entry（ICB），得到文件类型、长度与分配位置。
+
+///|
+/// 解析 ICB 链并收集分配描述符。
+/// 支持 UDF 1.02 的三种 ICB 形式：文件条目（tag 261）、间接条目（tag 259）、终止条目（tag 260）；
+/// 分配描述符的 extent type 3 按 ECMA-167 4/14.4 解释为「下一段分配描述符」，
+/// 指向分配扩展描述符（tag 258）后继续收集。
 fn UdfImage::read_entry(
   self : UdfImage,
   icb : UdfExtent,
@@ -268,8 +270,17 @@ fn UdfImage::read_entry(
     self.data.length(),
   )
   let tag = parse_tag(self.data, offset)
+  if tag.id == 259 {
+    // 间接条目（ECMA-167 4/14.7）：ICBTag 之后是 16 字节间接 ICB
+    let indirect = read_long_ad(self.data, offset + 36)
+    return self.read_entry(indirect)
+  }
+  if tag.id == 260 {
+    // 终止条目：空节点
+    return UdfNode::{ is_dir: false, size: 0L, extents: [], }
+  }
   if tag.id == 266 {
-    // 扩展文件条目（UDF 2.00+）字段更多，本库按 1.02 的 File Entry 处理，遇到就停
+    // 扩展文件条目属 UDF 2.00+，不在 1.02 范围内
     raise UnsupportedLayout("udf-extended-file-entry")
   }
   if tag.id != 261 {
@@ -281,43 +292,84 @@ fn UdfImage::read_entry(
   let l_ad = read_le32(self.data, offset + 172)
   let flags = read_le16(self.data, offset + 34)
   let long_ad = (flags & 1) != 0
-  let mut embedded = Bytes::make(0, b'\x00')
-  let extents : Array[UdfExtent] = []
-  let mut at = offset + 176 + l_ea
-  let end = at + l_ad
   let step = if long_ad { 16 } else { 8 }
+  let extents : Array[UdfExtent] = []
+  self.collect_extents(
+    offset + 176 + l_ea,
+    offset + 176 + l_ea + l_ad,
+    step,
+    icb.partition,
+    long_ad,
+    extents,
+  )
+  UdfNode::{ is_dir: file_type == 4, size: info_length, extents, }
+}
+
+///|
+/// 收集分配描述符区间 [start, end) 内的 extent；extent type 3 递归到分配扩展描述符。
+fn UdfImage::collect_extents(
+  self : UdfImage,
+  start : Int32,
+  end : Int32,
+  step : Int32,
+  default_partition : Int32,
+  long_ad : Bool,
+  out : Array[UdfExtent],
+) -> Unit raise IsoError {
+  let mut at = start
   while at + step <= end {
     let word = read_le32(self.data, at)
     let kind = (word >> 30) & 3
     let length = word & 0x3FFFFFFF
-    if kind == 3 {
-      // 内嵌数据：目录通常直接放在 File Entry 里
-      embedded = sub_bytes(self.data, at + step, at + step + length)
-    } else if kind == 0 && length > 0 {
-      let location = read_le32(self.data, at + 4)
-      let partition = if long_ad {
-        read_le16(self.data, at + 8)
-      } else {
-        icb.partition
+    let location = read_le32(self.data, at + 4)
+    let partition = if long_ad {
+      read_le16(self.data, at + 8)
+    } else {
+      default_partition
+    }
+    if kind == 0 && length > 0 {
+      out.push(UdfExtent::{ length, location, partition, })
+    } else if kind == 3 && length > 0 {
+      // 下一段分配描述符：位置指向分配扩展描述符（tag 258）
+      let aed = extent_offset(
+        self.partition_start + location,
+        24,
+        self.block_size,
+        self.data.length(),
+      )
+      let t = parse_tag(self.data, aed)
+      if t.id != 258 {
+        raise BadDescriptor(t.id)
       }
-      extents.push(UdfExtent::{ length, location, partition, })
+      let ad_len = read_le32(self.data, aed + 20)
+      self.collect_extents(
+        aed + 24,
+        aed + 24 + ad_len,
+        step,
+        partition,
+        long_ad,
+        out,
+      )
     }
     at = at + step
   }
-  UdfNode::{ is_dir: file_type == 4, size: info_length, embedded, extents, }
 }
 
 ///|
 /// 取节点内容（内嵌优先，否则按分配描述符拼接）。
+
+///|
+/// 把节点内容拼成单个 Bytes（目录数据用）。超过 Bytes 上限时拒绝而不是截断。
 fn UdfImage::node_data(self : UdfImage, node : UdfNode) -> Bytes raise IsoError {
-  if node.embedded.length() > 0 {
-    return node.embedded
-  }
-  let mut total = 0
+  let mut total : Int64 = 0L
   for extent in node.extents {
-    total = total + extent.length
+    total = total + extent.length.to_int64()
   }
-  let out = FixedArray::make(total, b'\x00')
+  if total > 2147483647L {
+    raise PayloadTooLarge(total)
+  }
+  let n = total.to_int()
+  let out = FixedArray::make(n, (0).to_byte())
   let mut written = 0
   for extent in node.extents {
     let start = extent_offset(
@@ -327,7 +379,9 @@ fn UdfImage::node_data(self : UdfImage, node : UdfNode) -> Bytes raise IsoError 
       self.data.length(),
     )
     for i = 0; i < extent.length; i = i + 1 {
-      out[written + i] = self.data[start + i]
+      if written + i < n {
+        out[written + i] = self.data[start + i]
+      }
     }
     written = written + extent.length
   }
@@ -421,10 +475,13 @@ fn UdfImage::read_dir_entries(
 
 ///|
 /// 读取文件内容。
-pub fn UdfImage::read_file(
+
+///|
+/// 按路径解析到节点（目录或文件）。
+fn UdfImage::resolve_node(
   self : UdfImage,
   path : String,
-) -> Bytes raise IsoError {
+) -> UdfNode raise IsoError {
   let segments : Array[String] = []
   for segment in path.split("/") {
     let seg = segment.to_owned()
@@ -434,6 +491,9 @@ pub fn UdfImage::read_file(
   }
   let mut node = self.read_entry(self.root)
   for seg in segments {
+    if !node.is_dir {
+      raise NotDirectory(path)
+    }
     let entries = self.read_dir_entries(node)
     let mut found = false
     for entry in entries {
@@ -447,8 +507,91 @@ pub fn UdfImage::read_file(
       raise NotFound(path)
     }
   }
+  node
+}
+
+///|
+/// 文件大小（64 位，原样给出 UDF 的信息长度；不受 Bytes 上限影响）。
+pub fn UdfImage::file_size(
+  self : UdfImage,
+  path : String,
+) -> Int64 raise IsoError {
+  let node = self.resolve_node(path)
+  node.size
+}
+
+///|
+/// 读取文件的一段：offset 与 length 都用 64 位规划，length 为 0 时读到文件末尾。
+/// 这是合法大文件（含 > 4 GiB）的读取路径：绕开「整文件物化成一个 Bytes」的 32 位上限。
+pub fn UdfImage::read_range(
+  self : UdfImage,
+  path : String,
+  offset : Int64,
+  length : Int32,
+) -> Bytes raise IsoError {
+  let node = self.resolve_node(path)
   if node.is_dir {
     raise IsDirectory(path)
+  }
+  if offset < 0L || length < 0 {
+    raise Truncated
+  }
+  let total = node.size
+  if offset > total {
+    raise Truncated
+  }
+  let want64 = if length == 0 { total - offset } else { length.to_int64() }
+  if offset + want64 > total || want64 > 2147483647L {
+    raise Truncated
+  }
+  let want = want64.to_int()
+  let out = FixedArray::make(want, (0).to_byte())
+  let mut written = 0
+  let mut seg_start : Int64 = 0L
+  for extent in node.extents {
+    if written >= want {
+      break
+    }
+    let seg_end = seg_start + extent.length.to_int64()
+    if offset < seg_end && offset + want64 > seg_start {
+      let from64 = if offset > seg_start { offset } else { seg_start }
+      let to64 = if offset + want64 < seg_end {
+        offset + want64
+      } else {
+        seg_end
+      }
+      let start = extent_offset(
+        self.partition_start + extent.location,
+        extent.length,
+        self.block_size,
+        self.data.length(),
+      )
+      let base = (from64 - seg_start).to_int()
+      let n = (to64 - from64).to_int()
+      for k = 0; k < n; k = k + 1 {
+        out[written + k] = self.data[start + base + k]
+      }
+      written = written + n
+    }
+    seg_start = seg_end
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
+/// 读取整个文件（物化为单个 Bytes）。
+/// UDF 1.02 允许大于 4 GiB 的文件，而 Bytes 的索引是 32 位：
+/// 超过 2 GiB−1 时抛 PayloadTooLarge，请改用 read_range 分块读取。
+pub fn UdfImage::read_file(
+  self : UdfImage,
+  path : String,
+) -> Bytes raise IsoError {
+  let node = self.resolve_node(path)
+  if node.is_dir {
+    raise IsDirectory(path)
+  }
+  if node.size > 2147483647L {
+    raise PayloadTooLarge(node.size)
   }
   self.node_data(node)
 }

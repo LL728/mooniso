@@ -444,7 +444,27 @@ fn run_cli(args : Array[String]) -> Int32 {
       return 0
     }
     if command == "udf-cat" {
-      println(@utf8.decode_lossy(@mooniso.UdfImage::open(raw).read_file(path)))
+      let udf_image = @mooniso.UdfImage::open(raw)
+      // 可选 [offset] [length]：大文件按区间读取，避免整文件物化
+      let offset = if base + 3 < args.length() {
+        Some(@string.parse_int64(args[base + 3])) catch {
+          _ => None
+        }
+      } else {
+        None
+      }
+      let length = if base + 4 < args.length() {
+        Some(@string.parse_int(args[base + 4])) catch {
+          _ => None
+        }
+      } else {
+        None
+      }
+      let bytes = match (offset, length) {
+        (Some(off), Some(len)) => udf_image.read_range(path, off, len)
+        _ => udf_image.read_file(path)
+      }
+      println(@utf8.decode_lossy(bytes))
       return 0
     }
     let image = @mooniso.IsoImage::open(raw)

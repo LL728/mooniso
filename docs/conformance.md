@@ -64,10 +64,10 @@
 
 ## ECMA-167（UDF）
 
-**符合的版本：UDF 1.02**（OSTA UDF 1.02 / ECMA-167 第 2 版）单分区只读映像的**结构与寻址语义**；文件大小 ≤ 4 GiB−1（InformationLength 高 32 位必须为 0，超出报错不截断）。
+**完整符合的版本：UDF 1.02 单分区只读映像读取**（OSTA UDF 1.02 / ECMA-167 第 2 版）：Anchor、卷描述符序列（PVD / IUVD / PD / LVD / USD / TD）、File Set Descriptor、File Entry（tag 261）、间接条目（tag 259）、终止条目（tag 260）、分配扩展描述符（tag 258）、FID（tag 257）、short_ad / long_ad、64 位 InformationLength。文件大小不受 4 GiB 限制：`file_size` 返回 `Int64`；`read_range` 按 64 位偏移分块读取任意长度（含 > 4 GiB）；`read_file` 仅在「整文件物化」超过 `Bytes` 32 位索引（> 2 GiB−1）时抛 `PayloadTooLarge`，并指引改用 `read_range`。
 下表只覆盖该版本；**1.50 / 2.00 / 2.01 / 2.50 / 2.60 均不在声明范围内**，原因见本节末表。
 
-版本声明的对象是**结构集**，不是描述符里印的修订号：仓库内的 UDF 夹具由 pycdlib 写出，标称 2.60，但不使用元数据分区、VAT、Sparable 与扩展文件条目（这些结构分别由 2.00+ 与 2.50+ 引入），因此它的结构集就是 1.02 的子集。反过来，「符合 UDF 1.02 结构与寻址语义」不等于「能读任何标着 1.02 的映像」：超出该结构集的布局、或 InformationLength 高 32 位非零（> 4 GiB 文件），解析器在检测点显式失败（`UnsupportedLayout` / `Truncated`），不猜读、不静默截断。
+版本声明的对象是**结构集**，不是描述符里印的修订号：仓库内的 UDF 夹具由 pycdlib 写出，标称 2.60，但不使用元数据分区、VAT、Sparable 与扩展文件条目（这些结构分别由 2.00+ 与 2.50+ 引入），因此它的结构集就是 1.02 的子集。反之，未进入 UDF 1.02 的布局（元数据分区、虚拟分区、Sparable、扩展文件条目 tag 266）一旦出现，解析器在检测点显式失败（`UnsupportedLayout`），不猜读、不静默截断。
 
 | 结构 | 条款 | 实现 | 判别用例 | 判据 |
 |---|---|---|---|---|
@@ -82,7 +82,7 @@
 
 | 版本 | 文件条目寻址 | 本库行为 |
 |---|---|---|
-| UDF 1.02 | 普通分区 + File Entry（tag 261） | 结构与寻址语义读取（下表逐条；> 4 GiB 文件报错） |
+| UDF 1.02 | 普通分区 + File Entry（261）/ 间接条目（259）/ 终止条目（260）/ 分配扩展（258）/ FID（257） | 完整读取（下表逐条，含 64 位文件长度） |
 | UDF 1.50 / 2.00 / 2.01 | 引入扩展文件条目（tag 266）、Sparable 分区等 | 不声明；遇到 tag 266 或 Sparable 映射返回 `UnsupportedLayout` |
 | UDF 2.50 / 2.60 | 文件条目作为可重定位元数据，经**元数据分区**寻址 | 不声明；检测到元数据分区映射返回 `UnsupportedLayout("udf-metadata-partition")` |
 | 多区段（任意版本） | 虚拟分区 + VAT 重映射 | 不声明；检测到虚拟分区映射返回 `UnsupportedLayout("udf-virtual-partition")` |
@@ -112,7 +112,8 @@ CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐�
 |---|---|
 | UDF 写入 | 职责边界：本库写入侧产出 ISO 9660 + Joliet + Rock Ridge，UDF 侧只提供读取 |
 | 元数据分区（UDF 2.50+）、VAT/虚拟分区、Sparable 分区、扩展文件条目 | 见上表：这些结构改变文件条目寻址，检测到即显式拒绝（`UnsupportedLayout`），不静默误读 |
-| 单个文件 > 4 GiB 的 UDF 读取 | ECMA-167 4/14.9 的 64 位信息长度：本实现按 32 位长度处理，高 32 位非零时返回 `UnsupportedLayout("udf-file-over-4gib")`，不截断 |
+| 单个文件 > 4 GiB 的 UDF 读取 | 支持：InformationLength 按 64 位解析，`file_size` 返回 `Int64`；`read_range(offset: Int64, length)` 分块读取任意长度，不受 `Bytes` 上限影响 |
+| 单个文件 > 2 GiB 的 UDF 整文件物化 | `read_file` 需返回单个 `Bytes`（索引 32 位），超过 2 GiB−1 抛 `PayloadTooLarge(n)`，文档指引改用 `read_range` |
 | 单个文件 > 2 GiB 的 ISO 9660 读取 | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`；`read_range` 可分区间读取 |
 | 启动 section 数量上限 | 启动目录固定一扇区：默认启动项 32 字节 + 每附加段 64 字节，上限 32 段，超出返回 `UnsupportedLayout("el-torito-too-many-sections")` |
 | 多段文件写入 | ECMA-119 9.1.6：读侧已合并多段，写侧不拆分 |
