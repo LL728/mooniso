@@ -112,7 +112,8 @@ CLI 层另有 `tools/oracle/udf_bounds.py`（CI 内运行）对三种布局逐�
 |---|---|
 | UDF 写入 | 职责边界：本库写入侧产出 ISO 9660 + Joliet + Rock Ridge，UDF 侧只提供读取 |
 | 元数据分区（UDF 2.50+）、VAT/虚拟分区、Sparable 分区、扩展文件条目 | 见上表：这些结构改变文件条目寻址，检测到即显式拒绝（`UnsupportedLayout`），不静默误读 |
-| 单个文件 > 4 GiB 的 UDF 读取 | 支持：InformationLength 按 64 位解析，`file_size` 返回 `Int64`；`read_range(offset: Int64, length)` 分块读取任意长度，不受 `Bytes` 上限影响 |
+| 单个文件 > 4 GiB 的 UDF 读取 | 支持：`InformationLength` 按 64 位解析，`file_size` 返回 `Int64`；`read_range(offset: Int64, length)` 只取请求区间 |
+| 映像本身超过 2 GiB（大于单块 `Bytes` 上限） | 支持：解析器只经 `ImageSource`（64 位 `total` + 64 位 `read_at`）按 2048 字节块取数，anchor / VDS / FSD / ICB / 分配描述符各取一两块，整张映像不入内存；`open(Bytes)` 保留为 `from_bytes` 薄包装 |
 | 单个文件 > 2 GiB 的 UDF 整文件物化 | `read_file` 需返回单个 `Bytes`（索引 32 位），超过 2 GiB−1 抛 `PayloadTooLarge(n)`，文档指引改用 `read_range` |
 | 单个文件 > 2 GiB 的 ISO 9660 读取 | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`；`read_range` 可分区间读取 |
 | 启动 section 数量上限 | 启动目录固定一扇区：默认启动项 32 字节 + 每附加段 64 字节，上限 32 段，超出返回 `UnsupportedLayout("el-torito-too-many-sections")` |

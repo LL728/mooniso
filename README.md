@@ -12,7 +12,7 @@
 | Joliet | 补充卷描述符、UCS-2 名字（含代理对） | 完整目录树 + UCS-2 路径表 | pycdlib、Windows 挂载 |
 | IEEE P1282（SUSP / Rock Ridge） | SP / ER / RR / NM / PX / SL / CE | NM / PX / SL / TF，1.09 与 1.12 两版 | pycdlib |
 | El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动；支持多启动 section），可选 boot info table（`--boot-info-table`，供 syslinux/isolinux） | pycdlib、mkisofs 约定 |
-| ECMA-167（UDF） | **UDF 1.02 单分区只读完整读取**：Anchor → 描述符序列 → File Set → File Entry / 间接条目 / 分配扩展 → FID；64 位文件长度，大文件用 `read_range` 分块读 | —（只读） | pycdlib 的 UDF 视角 |
+| ECMA-167（UDF） | **UDF 1.02 单分区只读完整读取**：Anchor → 描述符序列 → File Set → File Entry / 间接条目 / 分配扩展 → FID；64 位文件长度；映像经 `ImageSource` 按 2048 字节块读取，**不必整张进内存** | —（只读） | pycdlib 的 UDF 视角 |
 
 条款级的「实现文件 / 判别用例 / 判据」三列对照见 [docs/conformance.md](docs/conformance.md)。
 
@@ -52,6 +52,35 @@ moon run examples/roundtrip
 
 包结构：`LL728/mooniso` 是对外门面（只转出类型），实现全在 `LL728/mooniso/impl`——
 字节序、卷描述符、目录记录、SUSP、El Torito、UDF、写入器各一块。底层解析函数留在实现包里，不作为接口承诺。
+
+## 大映像：数据源与 64 位寻址
+
+`Bytes` 的索引是 32 位，单块内存上限约 2 GiB；而 UDF 1.02 的映像与其中的文件都允许 64 位长度。
+若解析器要求先 `open(data : Bytes)` 把整张映像装进内存，6 GiB 的映像就永远进不了解析器——
+只把输出改成区间读取，绕不过这个输入上限。
+
+因此解析器只通过 `ImageSource` 取数据：64 位总长度 + 64 位 `read_at(offset, length)` 回调，
+内部按 2048 字节逻辑块读取 anchor、卷描述符序列、File Set、ICB 与分配描述符，越界与短读一律 `Truncated`。
+数据从哪来由宿主决定：文件句柄 + seek、`Blob.slice`、HTTP Range、或内存切片都行。
+
+```moonbit
+// 6 GiB 映像：宿主按块现取，整张映像不进内存
+let source = @mooniso.ImageSource::new(file_len, fn(offset, length) {
+  read_from_disk(offset, length)          // 返回恰好 length 字节，短读会被判 Truncated
+})
+let udf = @mooniso.UdfImage::open_with_source(source)
+
+// 输出侧同样是 64 位：只取请求区间，不整块拷贝
+udf.file_size("/BIG.BIN")                 // 6442450944（6 GiB，Int64）
+udf.read_range("/BIG.BIN", 1073741824L, 64) // 1 GiB 偏移处取 64 字节
+
+// 整张映像已在内存里时保持原用法（内部仍走同一套 64 位 read_at）
+let image = @mooniso.IsoImage::open(bytes)
+```
+
+仓库内有一条对应的端到端用例（`impl/source_bigimage_wbtest.mbt`）：16 GiB 虚拟映像里读 6 GiB 文件，
+`file_size` 返回 `6442450944`、1 GiB 偏移处取 64 字节，并断言宿主累计只被读 41,046 字节——
+解析一张 16 GiB 映像的内存占用与 16 KiB 映像相同。
 
 ## 命令行
 
@@ -121,7 +150,7 @@ python tools/demo/official.py          # 正式版
 | UDF 写入 | 写入侧产出 ISO 9660 / Joliet / Rock Ridge；UDF 只提供读取 |
 | UDF 2.50 / 2.60 | 这两个版本的文件条目经**元数据分区**寻址（OSTA UDF 2.50 §2.3.10）：去掉该层无法定位 file entry，因此不声明兼容。检测到元数据分区映射即返回 `UnsupportedLayout("udf-metadata-partition")`，退出码 1 |
 | UDF 的 VAT（虚拟分区）、Sparable 分区、扩展文件条目（tag 266） | 多区段写入、可重写介质备用块、UDF 2.00+ 的更长文件条目头；三者都会改变寻址，检测到即返回 `UnsupportedLayout`，不按普通分区猜读 |
-| 单个文件 > 4 GiB（UDF） | 支持：`file_size` 返回 `Int64`，`read_range` 按 64 位偏移分块读取；`read_file` 的整文件物化上限是 2 GiB−1（`Bytes` 32 位索引），超出抛 `PayloadTooLarge`，请改用 `read_range` |
+| 单个文件 > 4 GiB（UDF） | 支持：`file_size` 返回 `Int64`，`read_range(offset: Int64, length)` 按 64 位偏移只取请求区间；`read_file` 的整文件物化上限是 2 GiB−1（`Bytes` 32 位索引），超出抛 `PayloadTooLarge`，请改用 `read_range` |
 | 单个文件 > 2 GiB（ISO 9660） | ECMA-119 目录记录的 data length 是 32 位 both-endian，`Bytes` 也是 32 位索引：单文件物化上限约 2 GiB，超出返回 `Truncated`（`read_range` 仍可分区间读取） |
 | 启动 section 数量 | 启动目录固定一扇区：默认启动项 32 字节 + 每附加段 64 字节，上限 32 段，超出返回 `UnsupportedLayout("el-torito-too-many-sections")` |
 | 多段文件写入、CL/PL 深层目录重定位（写入） | ECMA-119 9.1.6、P1282 §4.1.8/§4.1.9。ECMA-119 9.4 规定目录层级上限 8：超过时 `build()` 直接报 `UnsupportedLayout("iso9660-directory-depth")`，不产出表面可读、实则不合规的映像；确需深层路径时用 `allow_deep_paths(true)` 显式放行 |
