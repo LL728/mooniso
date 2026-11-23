@@ -10,6 +10,7 @@ pub using @impl {
   type IsoImage,
   type IsoBuilder,
   type UdfImage,
+  type ImageSource,
   type WalkEntry,
   type ValidationReport,
   type UdfEntry,

@@ -154,7 +154,8 @@ priv struct UdfNode {
 ///|
 /// UDF 映像。
 pub struct UdfImage {
-  data : Bytes
+  /// 分块数据源：偏移与长度全程 64 位，映像不必进内存。
+  source : ImageSource
   block_size : Int32
   partition_start : Int32
   root : UdfExtent
@@ -183,16 +184,22 @@ fn decode_dstring(raw : Bytes) -> String {
 ///|
 /// 打开 UDF 映像；不是 UDF（没有有效 Anchor）时以 BadDescriptor 失败。
 pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
-  let anchor = 256 * 2048
-  if anchor + 2048 > data.length() {
-    raise Truncated
-  }
-  let tag = parse_tag(data, anchor)
+  UdfImage::open_with_source(ImageSource::from_bytes(data))
+}
+
+///|
+/// 用分块数据源打开 UDF 映像。
+/// 解析全程只按 2048 字节块向宿主取数据：定位 anchor、卷描述符序列、File Set、根 ICB 各读一两块，
+/// 因此一张 6 GiB 映像的解析内存占用与 6 KiB 映像相同，**不要求整张映像进内存**。
+pub fn UdfImage::open_with_source(
+  source : ImageSource,
+) -> UdfImage raise IsoError {
+  let anchor = read_image_block(source, 256L, 2048)
+  let tag = parse_tag(anchor, 0)
   if tag.id != 2 || !tag.checksum_ok {
     raise BadDescriptor(tag.id)
   }
-  // 主卷描述符序列
-  let sequence = read_long_ad(data, anchor + 16)
+  let sequence = read_long_ad(anchor, 16)
   if sequence.length <= 0 {
     raise BadDescriptor(0)
   }
@@ -200,18 +207,21 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
   let mut block_size = 2048
   let mut file_set : UdfExtent? = None
   let blocks = sequence.length / 2048
-  for i = 0; i < blocks; i = i + 1 {
-    let offset = block_offset(sequence.location + i, 2048, data.length()) catch {
-      _ => break
-    }
-    let t = parse_tag(data, offset)
+  let mut i = 0
+  while i < blocks {
+    let buf = read_image_block(
+      source,
+      sequence.location.to_int64() + i.to_int64(),
+      2048,
+    )
+    let t = parse_tag(buf, 0)
     if t.id == 5 {
-      partition_start = read_le32(data, offset + 188)
+      partition_start = read_le32(buf, 188)
     } else if t.id == 6 {
-      block_size = read_le32(data, offset + 212)
-      file_set = Some(read_long_ad(data, offset + 248))
+      block_size = read_le32(buf, 212)
+      file_set = Some(read_long_ad(buf, 248))
       // 这些布局改变了文件条目的寻址方式，必须显式拒绝而不是按普通分区读
-      for kind in partition_map_kinds(sub_bytes(data, offset, offset + 512)) {
+      for kind in partition_map_kinds(buf) {
         if kind == "metadata" {
           raise UnsupportedLayout("udf-metadata-partition")
         }
@@ -225,6 +235,7 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
     } else if t.id == 8 {
       break
     }
+    i = i + 1
   }
   if partition_start < 0 {
     raise BadDescriptor(partition_start)
@@ -237,17 +248,16 @@ pub fn UdfImage::open(data : Bytes) -> UdfImage raise IsoError {
     Some(extent) => extent
     None => raise BadDescriptor(0)
   }
-  let fsd_offset = extent_offset(
-    partition_start + fsd.location,
-    512,
+  let fsd_buf = read_image_block(
+    source,
+    partition_start.to_int64() + fsd.location.to_int64(),
     block_size,
-    data.length(),
   )
-  if parse_tag(data, fsd_offset).id != 256 {
+  if parse_tag(fsd_buf, 0).id != 256 {
     raise BadDescriptor(256)
   }
-  let root = read_long_ad(data, fsd_offset + 400)
-  UdfImage::{ data, block_size, partition_start, root, }
+  let root = read_long_ad(fsd_buf, 400)
+  UdfImage::{ source, block_size, partition_start, root, }
 }
 
 ///|
@@ -267,16 +277,12 @@ fn UdfImage::read_entry(
   self : UdfImage,
   icb : UdfExtent,
 ) -> UdfNode raise IsoError {
-  let offset = extent_offset(
-    self.partition_start + icb.location,
-    176,
-    self.block_size,
-    self.data.length(),
-  )
-  let tag = parse_tag(self.data, offset)
+  let block = self.partition_start.to_int64() + icb.location.to_int64()
+  let first = read_image_block(self.source, block, self.block_size)
+  let tag = parse_tag(first, 0)
   if tag.id == 259 {
     // 间接条目（ECMA-167 4/14.7）：ICBTag 之后是 16 字节间接 ICB
-    let indirect = read_long_ad(self.data, offset + 36)
+    let indirect = read_long_ad(first, 36)
     return self.read_entry(indirect)
   }
   if tag.id == 260 {
@@ -290,17 +296,28 @@ fn UdfImage::read_entry(
   if tag.id != 261 {
     raise BadDescriptor(tag.id)
   }
-  let file_type = self.data[offset + 27].to_uint().reinterpret_as_int()
-  let info_length = read_length64(self.data, offset + 56)
-  let l_ea = read_le32(self.data, offset + 168)
-  let l_ad = read_le32(self.data, offset + 172)
-  let flags = read_le16(self.data, offset + 34)
+  let file_type = first[27].to_uint().reinterpret_as_int()
+  let info_length = read_length64(first, 56)
+  let l_ea = read_le32(first, 168)
+  let l_ad = read_le32(first, 172)
+  if l_ea < 0 || l_ad < 0 || l_ea > 2147483000 || l_ad > 2147483000 {
+    raise Truncated
+  }
+  let flags = read_le16(first, 34)
   let long_ad = (flags & 1) != 0
   let step = if long_ad { 16 } else { 8 }
+  let needed = 176 + l_ea + l_ad
+  // 分配描述符跨出首块时按需再取，仍只取这一段，不取整张映像
+  let buffer = if needed > first.length() {
+    self.source.read_at(block * self.block_size.to_int64(), needed)
+  } else {
+    first
+  }
   let extents : Array[UdfExtent] = []
   self.collect_extents(
-    offset + 176 + l_ea,
-    offset + 176 + l_ea + l_ad,
+    buffer,
+    176 + l_ea,
+    176 + l_ea + l_ad,
     step,
     icb.partition,
     long_ad,
@@ -313,6 +330,7 @@ fn UdfImage::read_entry(
 /// 收集分配描述符区间 [start, end) 内的 extent；extent type 3 递归到分配扩展描述符。
 fn UdfImage::collect_extents(
   self : UdfImage,
+  buffer : Bytes,
   start : Int32,
   end : Int32,
   step : Int32,
@@ -320,13 +338,16 @@ fn UdfImage::collect_extents(
   long_ad : Bool,
   out : Array[UdfExtent],
 ) -> Unit raise IsoError {
-  self.collect_extents_at(start, end, step, default_partition, long_ad, out, 0)
+  self.collect_extents_at(
+    buffer, start, end, step, default_partition, long_ad, out, 0,
+  )
 }
 
 ///|
 /// 递归主体：depth 上限防止自引用 / 长链导致的无限递归（ECMA-167 未限制链长，实现必须自己设界）。
 fn UdfImage::collect_extents_at(
   self : UdfImage,
+  buffer : Bytes,
   start : Int32,
   end : Int32,
   step : Int32,
@@ -338,35 +359,42 @@ fn UdfImage::collect_extents_at(
   if depth > 8 {
     raise BadDescriptor(258)
   }
+  let limit = if end > buffer.length() { buffer.length() } else { end }
   let mut at = start
-  while at + step <= end {
-    let word = read_le32(self.data, at)
+  while at + step <= limit {
+    let word = read_le32(buffer, at)
     let kind = (word >> 30) & 3
     let length = word & 0x3FFFFFFF
-    let location = read_le32(self.data, at + 4)
+    let location = read_le32(buffer, at + 4)
     let partition = if long_ad {
-      read_le16(self.data, at + 8)
+      read_le16(buffer, at + 8)
     } else {
       default_partition
     }
     if kind == 0 && length > 0 {
       out.push(UdfExtent::{ length, location, partition, })
     } else if kind == 3 && length > 0 {
-      // 下一段分配描述符：位置指向分配扩展描述符（tag 258）
-      let aed = extent_offset(
-        self.partition_start + location,
-        24,
-        self.block_size,
-        self.data.length(),
-      )
-      let t = parse_tag(self.data, aed)
+      // 下一段分配描述符：位置指向分配扩展描述符（tag 258），按块取回后继续
+      let aed_block = self.partition_start.to_int64() + location.to_int64()
+      let head = read_image_block(self.source, aed_block, self.block_size)
+      let t = parse_tag(head, 0)
       if t.id != 258 {
         raise BadDescriptor(t.id)
       }
-      let ad_len = read_le32(self.data, aed + 20)
+      let ad_len = read_le32(head, 20)
+      if ad_len < 0 || ad_len > 2147483000 {
+        raise Truncated
+      }
+      let needed = 24 + ad_len
+      let aed = if needed > head.length() {
+        self.source.read_at(aed_block * self.block_size.to_int64(), needed)
+      } else {
+        head
+      }
       self.collect_extents_at(
-        aed + 24,
-        aed + 24 + ad_len,
+        aed,
+        24,
+        24 + ad_len,
         step,
         partition,
         long_ad,
@@ -395,16 +423,11 @@ fn UdfImage::node_data(self : UdfImage, node : UdfNode) -> Bytes raise IsoError 
   let out = FixedArray::make(n, (0).to_byte())
   let mut written = 0
   for extent in node.extents {
-    let start = extent_offset(
-      self.partition_start + extent.location,
-      extent.length,
-      self.block_size,
-      self.data.length(),
-    )
+    let start = (self.partition_start.to_int64() + extent.location.to_int64()) *
+      self.block_size.to_int64()
+    let chunk = self.source.read_at(start, extent.length)
     for i = 0; i < extent.length; i = i + 1 {
-      if written + i < n {
-        out[written + i] = self.data[start + i]
-      }
+      out[written + i] = chunk[i]
     }
     written = written + extent.length
   }
@@ -583,16 +606,16 @@ pub fn UdfImage::read_range(
       } else {
         seg_end
       }
-      let start = extent_offset(
-        self.partition_start + extent.location,
-        extent.length,
-        self.block_size,
-        self.data.length(),
-      )
+      // 只向宿主取请求的那一段字节，映像与文件都不整块进内存
+      let extent_start = (
+          self.partition_start.to_int64() + extent.location.to_int64()
+        ) *
+        self.block_size.to_int64()
       let base = (from64 - seg_start).to_int()
       let n = (to64 - from64).to_int()
+      let chunk = self.source.read_at(extent_start + base.to_int64(), n)
       for k = 0; k < n; k = k + 1 {
-        out[written + k] = self.data[start + base + k]
+        out[written + k] = chunk[k]
       }
       written = written + n
     }
@@ -621,4 +644,18 @@ pub fn UdfImage::read_file(
     raise PayloadTooLarge(node.size)
   }
   self.node_data(node)
+}
+
+///|
+/// 按逻辑块号从数据源取一块或若干块：块号与偏移全程 64 位，越界由 read_at 抛 Truncated。
+fn read_image_block(
+  source : ImageSource,
+  block : Int64,
+  block_size : Int32,
+) -> Bytes raise IsoError {
+  let size = block_size.to_int64()
+  if block < 0L || size <= 0L || size > 2147483647L {
+    raise Truncated
+  }
+  source.read_at(block * size, size.to_int())
 }
