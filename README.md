@@ -110,7 +110,7 @@ moon run cmd/main -- create out.iso ./rootfs --boot /boot.bin --efi /efi.img --l
 
 四类互不相同的判据，任何一类失败都会让 CI 变红：
 
-1. **单元测试 85 个**，wasm-gc 与 js 双后端各 85/85。负例覆盖截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent、32 位回绕、目录环、分配覆盖不足、超 4 GiB 长度、数据源越界与短读，确保"读坏了会报错"而不是"读出错数据"。
+1. **单元测试 88 个**，wasm-gc 与 js 双后端各 88/88。负例覆盖截断、魔数破坏、both-endian 不一致、非法记录长度、越界 extent、32 位回绕、目录环、分配覆盖不足、超 4 GiB 长度、数据源越界与短读，确保"读坏了会报错"而不是"读出错数据"。
 2. **与 pycdlib 对拍**：读取侧对 Joliet / Rock Ridge / El Torito / UDF 共 6 个目录逐条比对名字、类型、大小；写入侧把生成的映像交回 pycdlib 读，比对目录树、启动项、UEFI 分节、符号链接目标。
 3. **内核挂载**：CI 里用 Linux iso9660 驱动挂载我们自己生成的映像，按内容逐字节比对——驱动不认识我们的代码，只认识规范。
 4. **可复现性**：仓库内测试映像由 `tools/fixtures/build_corpus.py` 按规范构造，CI 每次重建并 `git diff --exit-code`，期望输出与代码行为不允许脱钩。
@@ -165,10 +165,11 @@ python tools/demo/official.py          # 正式版
 
 ## 版本
 
-仓库与 mooncakes 均为 `0.7.0`（2026-11-23 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
+仓库与 mooncakes 均为 `0.7.1`（2026-11-26 发布）。本版含 UDF 版本范围收敛、门面/实现分层，
 以及 5 项健壮性修复（32 位偏移回绕、按声明长度分配、目录环、写入侧缓冲区、超长记录）。
 0.3.1 相对 0.3.0 只改文档与演示资源：演示视频按 57 个单测重录、旁白 wav 不再入库（发布包因此从 3.13 MB 降到 1.41 MB）、README 单测数同步；接口无变化。
 0.3.2 相对 0.3.1 只同步文档文本（包体积差改为实测 3.13 MB 到 1.41 MB、UDF 版本声明的「结构集」口径），代码零改动。
+0.7.1 相对 0.7.0：仅测试与文档 —— 补 `RecordDate::to_iso_string` 与 `IsoImage::has_rock_ridge` 两条公开接口用例（单测 85→88）；`docs/conformance.md` 与 README 明确 libarchive / Windows CDFS 只作手工观察、未纳入自动化对拍；新增 `docs/acceptance.md` 断言台账（20 条，含证据与提交）。代码零改动。
 0.7.0 相对 0.6.1：新增分块数据源 `ImageSource`（64 位 `total` + 64 位 `read_at`）与 `UdfImage::open_with_source`——UDF 解析不再要求整张映像进内存，anchor / VDS / FSD / ICB / 分配描述符各按 2048 字节块读取；`UdfImage::open(Bytes)` 保留为 `ImageSource::from_bytes` 薄包装。新增 16 GiB 虚拟映像内 6 GiB 文件的端到端用例（`file_size` 返 6,442,450,944，1 GiB 偏移取 64 字节，宿主累计只读 41,046 字节）。单测 85。
 0.6.1 相对 0.6.0：仅文档修正 —— README 最小示例改为可编译形态（`add_file` 传 `Bytes`、插值改用转义写法、补 `@utf8` import 说明），新增 `examples/readme_demo` 可运行等价示例；单测数同步为 80（含 15 条负例），0.6.0 发布日期更正为 2026-11-20。代码零改动。
 0.6.0 相对 0.5.1：UDF 读取补齐到完整 1.02 —— 64 位文件长度（不再排除 >4 GiB）、间接条目（259）、终止条目（260）、分配扩展描述符（258，修正 extent type 3 的语义）、逻辑块大小守卫；新增 `UdfImage::file_size` 返回 `Int64` 与 `read_range(offset: Int64, length)` 分块读取大文件，`read_file` 整文件物化超 2 GiB−1 时抛 `PayloadTooLarge`；`udf-cat` 支持可选 `[offset] [length]`；修分配描述符延续无环检测导致的栈溢出与覆盖不足时静默补 0。
