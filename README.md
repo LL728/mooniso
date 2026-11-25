@@ -8,7 +8,7 @@
 
 | 规范 | 读 | 写 | 独立判据 |
 |---|---|---|---|
-| ECMA-119（ISO 9660） | 卷描述符链、目录记录、多段文件、路径解析、文件读取、L/M 路径表 | 名字级别 1/2/3、目录记录、L/M 路径表、块分配 | pycdlib、Linux 内核 isofs、Windows CDFS |
+| ECMA-119（ISO 9660） | 卷描述符链、目录记录、多段文件、路径解析、文件读取、L/M 路径表 | 名字级别 1/2/3、目录记录、L/M 路径表、块分配 | pycdlib、Linux 内核 isofs（CI 挂载）、Windows CDFS（手工观察） |
 | Joliet | 补充卷描述符、UCS-2 名字（含代理对） | 完整目录树 + UCS-2 路径表 | pycdlib、Windows 挂载 |
 | IEEE P1282（SUSP / Rock Ridge） | SP / ER / RR / NM / PX / SL / CE | NM / PX / SL / TF，1.09 与 1.12 两版 | pycdlib |
 | El Torito | 启动目录、默认启动项、UEFI section header | 启动记录卷描述符 + 启动目录（BIOS 与 UEFI 双启动；支持多启动 section），可选 boot info table（`--boot-info-table`，供 syslinux/isolinux） | pycdlib、mkisofs 约定 |
@@ -161,7 +161,7 @@ python tools/demo/official.py          # 正式版
 
 ## 来源与许可
 
-原创实现，未移植任何第三方源码。规范依据：ECMA-119、ECMA-167 / ISO 13346、El Torito Bootable CD-ROM Format Specification 1.0、IEEE P1282、Joliet Specification 1.0。行为仅对照 pycdlib（LGPL-2.1）、libarchive（BSD-2-Clause）、Windows CDFS 与 Linux 内核 isofs，全部只作测试判据，不随包分发。
+原创实现，未移植任何第三方源码。规范依据：ECMA-119、ECMA-167 / ISO 13346、El Torito Bootable CD-ROM Format Specification 1.0、IEEE P1282、Joliet Specification 1.0。行为仅对照 pycdlib（LGPL-2.1，自动化对拍）、Linux 内核 isofs（CI 挂载比对）；libarchive 与 Windows CDFS 只作手工观察、未纳入自动化对拍。全部只作测试判据，不随包分发。
 
 ## 版本
 

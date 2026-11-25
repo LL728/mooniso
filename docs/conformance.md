@@ -9,8 +9,8 @@
 |---|---|---|
 | pycdlib | 另一份 ISO 实现（Python，LGPL-2.1） | 全部解析逻辑，只在测试期调用 |
 | 内核 isofs | Linux 内核的 iso9660 驱动 | 全部解析逻辑，CI 内挂载后比对 |
-| Windows CDFS | Windows 自带光盘驱动 | 全部解析逻辑，本地挂载后比对 |
-| libarchive | bsdtar 的 ISO 读取路径 | 目录遍历与文件落盘 |
+| Windows CDFS | Windows 自带光盘驱动 | 全部解析逻辑，**仅人工/手工观察，未纳入自动化对拍** |
+| libarchive | bsdtar 的 ISO 读取路径 | 目录遍历与文件落盘，**未纳入自动化对拍** |
 
 ## ECMA-119（ISO 9660）
 
